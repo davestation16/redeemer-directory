@@ -9,13 +9,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import FamilyForm from '../components/FamilyForm';
 import { signOut } from 'firebase/auth';
 import AdminDashboard from './AdminDashboard';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MyFamilyDashboard from '../components/MyFamilyDashboard';
 import { WelcomeTutorial } from '../components/WelcomeTutorial';
 import Calendar from './Calendar';
 
 export default function Directory() {
   const { profile, isAdmin, user } = useAuth();
+  const navigate = useNavigate();
   const [families, setFamilies] = useState<Family[]>([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'directory' | 'calendar' | 'admin' | 'my-family'>('directory');
@@ -28,7 +29,17 @@ export default function Directory() {
     if (tab === 'my-family' || tab === 'calendar' || tab === 'admin' || tab === 'directory') {
       setActiveTab(tab as any);
     }
-  }, [location.search]);
+    
+    // Handle specific family edit request via query param
+    const editFamilyId = params.get('editFamilyId');
+    if (editFamilyId && families.length > 0) {
+      const familyToEdit = families.find(f => f.id === editFamilyId);
+      if (familyToEdit && canEdit(familyToEdit)) {
+        setEditingFamily(familyToEdit);
+        setIsFormOpen(true);
+      }
+    }
+  }, [location.search, families, isAdmin, user]);
   const [editingFamily, setEditingFamily] = useState<Family | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -61,13 +72,18 @@ export default function Directory() {
   }, []);
 
   const filteredFamilies = useMemo(() => {
-    return families.filter(f => 
-      f.familyName.toLowerCase().includes(search.toLowerCase()) ||
-      f.members?.some(m => 
-        m.name.toLowerCase().includes(search.toLowerCase()) ||
-        m.email?.toLowerCase().includes(search.toLowerCase())
-      )
-    );
+    return families.filter(f => {
+      // Hide pending families from the directory grid
+      if (!f.memberUids || f.memberUids.length === 0) {
+        return false;
+      }
+
+      return f.familyName.toLowerCase().includes(search.toLowerCase()) ||
+        f.members?.some(m => 
+          m.name.toLowerCase().includes(search.toLowerCase()) ||
+          m.email?.toLowerCase().includes(search.toLowerCase())
+        );
+    });
   }, [families, search]);
 
   const handleEdit = (family: Family) => {
@@ -100,10 +116,20 @@ export default function Directory() {
     window.print();
   };
 
+  const handleCloseForm = () => {
+    setIsFormOpen(false);
+    setEditingFamily(null);
+    const params = new URLSearchParams(location.search);
+    if (params.has('editFamilyId')) {
+      params.delete('editFamilyId');
+      navigate({ search: params.toString() }, { replace: true });
+    }
+  };
+
   return (
     <div className={`min-h-screen bg-bg-natural flex flex-col md:flex-row ${activeTab === 'directory' ? 'print:bg-white' : ''}`}>
       {/* Mobile Header (Only visible on small screens) */}
-      <div className="md:hidden bg-sage text-white p-4 flex items-center justify-between sticky top-0 z-[60] print:hidden">
+      <div className="md:hidden bg-sage text-white p-4 pt-[calc(1rem+env(safe-area-inset-top))] flex items-center justify-between sticky top-0 z-[60] print:hidden">
         <div className="flex items-center gap-3">
           <div className="w-12 h-auto p-2 bg-white/10 backdrop-blur-sm rounded-lg">
             <img 
@@ -148,7 +174,7 @@ export default function Directory() {
                 className={`flex items-center justify-between gap-4 text-xl font-medium w-full text-left transition-all ${activeTab === 'my-family' ? 'text-white' : 'text-white/60'}`}
               >
                 <div className="flex items-center gap-4">
-                  <Users size={24} /> My Family
+                  <Users size={24} /> Edit My Details
                 </div>
                 {!hideTutorial && (
                   <motion.div 
@@ -184,7 +210,7 @@ export default function Directory() {
       </AnimatePresence>
 
       {/* Sidebar - Desktop (Hidden during print) */}
-      <aside className="hidden md:flex w-72 bg-sage text-white p-8 flex-col justify-between shrink-0 sticky top-0 h-screen z-50 print:hidden">
+      <aside className="hidden md:flex w-72 bg-sage text-white p-8 pl-[calc(2rem+env(safe-area-inset-left))] flex-col justify-between shrink-0 sticky top-0 h-screen z-50 print:hidden">
         <div className="space-y-12">
           <div className="space-y-6">
             <div className="w-32 h-auto p-4 bg-white/10 backdrop-blur-sm rounded-2xl group transition-all hover:bg-white/15">
@@ -218,7 +244,7 @@ export default function Directory() {
               className={`flex items-center justify-between p-3 rounded-xl w-full text-left transition-colors relative ${activeTab === 'my-family' ? 'bg-white/10' : 'opacity-70 hover:opacity-100'}`}
             >
               <div className="flex items-center gap-3">
-                <Users size={18} /> My Family
+                <Users size={18} /> Edit My Details
               </div>
               {!hideTutorial && (
                 <motion.div 
@@ -252,11 +278,11 @@ export default function Directory() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-12 flex flex-col min-w-0">
+      <main className="flex-1 p-6 md:p-12 pr-[calc(1.5rem+env(safe-area-inset-right))] flex flex-col min-w-0">
         <header className="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-6 md:mb-12 gap-4 md:gap-8">
           <div className="space-y-2">
             <h2 className="text-4xl lg:text-5xl font-serif text-stone">
-              {activeTab === 'admin' ? 'System Controls' : activeTab === 'my-family' ? 'My Family' : activeTab === 'calendar' ? 'Events' : 'Redeemer Directory'}
+              {activeTab === 'admin' ? 'System Controls' : activeTab === 'my-family' ? 'Edit My Details' : activeTab === 'calendar' ? 'Events' : 'Redeemer Directory'}
             </h2>
           </div>
           
@@ -349,10 +375,12 @@ export default function Directory() {
                           </div>
 
                           <div className="px-2">
-                            <h3 className="font-serif text-xl text-stone group-hover:text-sage transition-colors leading-tight">
-                              {family.familyName}
+                            <h3 className="font-serif text-lg text-stone group-hover:text-sage transition-colors leading-tight break-words [overflow-wrap:anywhere]">
+                              {family.members?.length === 1 
+                                ? `${family.members[0].name} ${family.familyName}` 
+                                : `The ${family.familyName} Family`}
                             </h3>
-                            <p className="text-[10px] uppercase font-bold text-stone-light tracking-widest opacity-60 mt-1">
+                            <p className="text-[10px] uppercase font-bold text-stone-light tracking-widest opacity-60 mt-2">
                               {family.members?.length || 0} Members
                             </p>
                           </div>
@@ -376,7 +404,11 @@ export default function Directory() {
                 <div key={`print-${family.id}`} className="family-print-page">
                    <div className="flex justify-between items-start mb-12">
                       <div className="space-y-4">
-                        <h1 className="text-5xl font-serif text-stone">The {family.familyName} Family</h1>
+                        <h1 className="text-5xl font-serif text-stone">
+                          {family.members?.length === 1 
+                            ? `${family.members[0].name} ${family.familyName}` 
+                            : `The ${family.familyName} Family`}
+                        </h1>
                         {family.address && (
                           <div className="flex items-center gap-2 text-stone-light">
                             <MapPin size={18} />
@@ -432,7 +464,7 @@ export default function Directory() {
       {isFormOpen && (
         <FamilyForm 
           family={editingFamily} 
-          onClose={() => { setIsFormOpen(false); setEditingFamily(null); }} 
+          onClose={handleCloseForm} 
           onSave={() => {}}
         />
       )}

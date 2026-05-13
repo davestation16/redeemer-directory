@@ -716,7 +716,7 @@ export default function Login({ inviteOnly }: LoginProps) {
                 </button>
                 <div className="p-6 bg-stone/5 rounded-3xl text-center">
                   <p className="text-xs text-stone-light">
-                    Codes are unique to each family. Multiple members of your family can enter the same code. If you don't have one, email <a href="mailto:ruby@redeemeratl.org" className="text-sage font-semibold hover:underline">ruby@redeemeratl.org</a> to request one.
+                    Codes are unique to each family. Multiple members of your family can enter the same code. If you don't have one, email <a href="mailto:ruby@redeemeratl.org" target="_blank" rel="noopener noreferrer" className="text-sage font-semibold hover:underline">ruby@redeemeratl.org</a> to request one.
                   </p>
                 </div>
               </form>

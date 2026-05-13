@@ -337,6 +337,8 @@ export default function MyFamilyDashboard() {
         </p>
         <a 
           href="mailto:info@redeemeratl.org"
+          target="_blank"
+          rel="noopener noreferrer"
           className="inline-block py-4 px-8 bg-sage text-white rounded-full font-bold uppercase tracking-widest text-xs hover:brightness-110 transition-all"
         >
           Contact Admin
@@ -373,13 +375,14 @@ export default function MyFamilyDashboard() {
             </div>
           )}
           
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-10">
-            <div className="flex justify-between items-end w-full">
-              <div className="text-white w-full">
-                <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif mb-2 text-center md:text-left break-words [overflow-wrap:anywhere]">
-                  The {family.familyName} Family
-                </h1>
-                <div className="flex items-center gap-2 text-xs uppercase tracking-widest font-bold opacity-80">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex flex-col md:flex-row items-center md:items-end justify-between p-8 md:p-12 gap-6">
+            <div className="text-white text-center md:text-left w-full">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-serif mb-3 break-words [overflow-wrap:anywhere]">
+                {family.members?.length === 1 
+                  ? `${family.members[0].name} ${family.familyName}` 
+                  : `The ${family.familyName} Family`}
+              </h1>
+              <div className="flex items-center justify-center md:justify-start gap-2 text-xs uppercase tracking-widest font-bold opacity-80">
                   {family.photoStatus === 'approved' ? (
                     <>
                       <CheckCircle2 size={14} className="text-green-400" />
@@ -394,7 +397,7 @@ export default function MyFamilyDashboard() {
                 </div>
               </div>
               
-              <label className="cursor-pointer bg-white/20 backdrop-blur-md hover:bg-white/30 text-white p-4 rounded-full transition-all relative group/btn">
+              <label className="cursor-pointer bg-white/20 backdrop-blur-md hover:bg-white/30 text-white p-4 rounded-full transition-all relative group/btn shrink-0">
                 <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} disabled={uploading} />
                 {uploading ? (
                   <div className="relative flex items-center justify-center">
@@ -405,7 +408,6 @@ export default function MyFamilyDashboard() {
               </label>
             </div>
           </div>
-        </div>
 
         {/* Invite System Section */}
         <div className="px-10 md:px-16 pt-10 border-b border-stone-border bg-sage/5">

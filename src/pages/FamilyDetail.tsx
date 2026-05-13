@@ -3,11 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Family } from '../types';
-import { ArrowLeft, MapPin, Mail, Phone, Users, Calendar, Heart, Gift, Smartphone, Edit } from 'lucide-react';
+import { ArrowLeft, MapPin, Mail, Phone, Users, Calendar, Heart, Gift, Edit } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format, parseISO } from 'date-fns';
-import CalendarActions from '../components/CalendarActions';
-import CalendarSyncModal from '../components/CalendarSyncModal';
 import { useAuth } from '../hooks/useAuth';
 
 export default function FamilyDetail() {
@@ -16,8 +14,6 @@ export default function FamilyDetail() {
   const { user, isAdmin } = useAuth();
   const [family, setFamily] = useState<Family | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   useEffect(() => {
     async function fetchFamily() {
@@ -38,6 +34,17 @@ export default function FamilyDetail() {
   }, [familyId]);
 
   const canEdit = family && (isAdmin || family.memberUids?.includes(user?.uid || ''));
+
+  const handleEditClick = () => {
+    if (!family) return;
+    if (family.memberUids?.includes(user?.uid || '')) {
+      // User's own family
+      navigate('/directory?tab=my-family');
+    } else if (isAdmin) {
+      // Admin editing another family
+      navigate(`/directory?editFamilyId=${family.id}`);
+    }
+  };
 
   const formatDisplayDate = (dateStr?: string) => {
     if (!dateStr) return null;
@@ -81,7 +88,7 @@ export default function FamilyDetail() {
   return (
     <div className="min-h-screen bg-stone-bg selection:bg-sage/10">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-stone-bg/80 backdrop-blur-md border-b border-stone-border/50">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-stone-bg/80 backdrop-blur-md border-b border-stone-border/50 pt-[env(safe-area-inset-top)]">
         <div className="max-w-5xl mx-auto px-6 h-auto md:h-20 py-4 md:py-0 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center justify-between w-full md:w-auto gap-4">
             <button 
@@ -96,7 +103,7 @@ export default function FamilyDetail() {
 
             {canEdit && (
               <button 
-                onClick={() => navigate('/directory?tab=my-family')} 
+                onClick={handleEditClick} 
                 className="flex md:hidden items-center gap-2 px-4 py-2 bg-sage/10 text-sage rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-sage hover:text-white transition-all"
               >
                 <Edit size={14} /> Edit Profile
@@ -107,23 +114,15 @@ export default function FamilyDetail() {
           <div className="flex items-center gap-3 w-full md:w-auto justify-center md:justify-end">
             {canEdit && (
               <button 
-                onClick={() => navigate('/directory?tab=my-family')} 
+                onClick={handleEditClick} 
                 className="hidden md:flex items-center gap-2 px-4 py-2 bg-sage/10 text-sage rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-sage hover:text-white transition-all"
               >
                 <Edit size={14} /> Edit Profile
               </button>
             )}
-            <button 
-              onClick={() => setIsSyncModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-stone text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-stone/90 transition-all shadow-lg shadow-stone/10"
-            >
-              <Smartphone size={14} /> Sync Entire Calendar
-            </button>
           </div>
         </div>
       </header>
-
-      <CalendarSyncModal isOpen={isSyncModalOpen} onClose={() => setIsSyncModalOpen(false)} />
 
       <main className="pt-32 pb-24 max-w-5xl mx-auto px-6">
         <motion.div
@@ -132,7 +131,9 @@ export default function FamilyDetail() {
           className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6"
         >
           <h1 className="font-serif text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-stone leading-tight tracking-tight text-center md:text-left break-words [overflow-wrap:anywhere] w-full">
-            The {family.familyName} Family
+            {family.members?.length === 1 
+              ? `${family.members[0].name} ${family.familyName}` 
+              : `The ${family.familyName} Family`}
           </h1>
         </motion.div>
 
@@ -177,11 +178,6 @@ export default function FamilyDetail() {
                 <div className="space-y-3 pt-6 border-t border-stone-border/50">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[10px] uppercase tracking-[0.2em] font-bold text-stone-light">Wedding Anniversary</h3>
-                    <CalendarActions 
-                      name={`The ${family.familyName} Family`} 
-                      date={family.weddingAnniversary} 
-                      type="Anniversary" 
-                    />
                   </div>
                   <div className="flex gap-3 items-center text-stone font-medium text-sm">
                     <Heart size={16} className="text-terracotta shrink-0" />
@@ -222,11 +218,6 @@ export default function FamilyDetail() {
                   >
                     <div className="mb-6 flex items-start justify-between">
                       <h4 className="text-xl font-serif text-stone group-hover:text-sage transition-colors leading-tight">{member.name}</h4>
-                      <CalendarActions 
-                        name={member.name} 
-                        date={member.birthday || ''} 
-                        type="Birthday" 
-                      />
                     </div>
 
                     <div className="space-y-3 pt-4 border-t border-stone-border/20">
@@ -237,7 +228,7 @@ export default function FamilyDetail() {
                         </div>
                       )}
                       {member.email && (
-                        <a href={`mailto:${member.email}`} className="flex items-center gap-3 text-stone-light text-xs font-medium hover:text-sage transition-colors truncate">
+                        <a href={`mailto:${member.email}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 text-stone-light text-xs font-medium hover:text-sage transition-colors truncate">
                           <Mail size={14} className="opacity-40" />
                           <span className="truncate">{member.email}</span>
                         </a>

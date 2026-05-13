@@ -4,10 +4,11 @@ import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, addDoc
 import { ref, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Family, Invite, InviteCode, PhotoStatus, AccessRequest, FamilyMemberRole, FamilyMember } from '../types';
 import { useAuth } from '../hooks/useAuth';
-import { X, Check, Trash2, Key, Users, Image as ImageIcon, Plus, ArrowLeft, ExternalLink, Database, Inbox, UserCheck, UserX, Mail, Download, Menu, ChevronDown, AlertTriangle, Search } from 'lucide-react';
+import { X, Check, Trash2, Key, Users, Image as ImageIcon, Plus, ArrowLeft, ExternalLink, Database, Inbox, UserCheck, UserX, Mail, Download, Menu, ChevronDown, AlertTriangle, Search, Edit, Link } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import BulkImport from '../components/BulkImport';
+import FamilyForm from '../components/FamilyForm';
 
 interface AdminDashboardProps {
   onClose: () => void;
@@ -17,6 +18,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<'invites' | 'directory' | 'photos' | 'import' | 'requests' | 'admins' | 'cleanup'>('invites');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCreatingFamily, setIsCreatingFamily] = useState(false);
+  const [editingFamily, setEditingFamily] = useState<Family | null>(null);
+  const [isEditFormOpen, setIsEditFormOpen] = useState(false);
   const [manualFamilyForm, setManualFamilyForm] = useState({
     familyName: '',
     weddingAnniversary: '',
@@ -30,12 +33,15 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [families, setFamilies] = useState<Family[]>([]);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [connectingUserId, setConnectingUserId] = useState<string | null>(null);
+  const [familySearch, setFamilySearch] = useState('');
   
   const pendingPhotos = families.filter(f => f.photoStatus === 'pending');
   
   // New Family Invite State
   const [inviteForm, setInviteForm] = useState({
     familyName: '',
+    firstName: '',
     emails: ['']
   });
   
@@ -140,14 +146,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   };
 
   const getUnregisteredMembers = () => {
-    const unregistered: { familyName: string, member: any }[] = [];
+    const unregistered: { familyName: string, member: any, magicLink?: string }[] = [];
     families.forEach(family => {
       family.members?.forEach(member => {
         if (member.email) {
           const email = member.email.toLowerCase().trim();
           const hasAccount = allUsers.some(u => u.email?.toLowerCase().trim() === email);
           if (!hasAccount) {
-            unregistered.push({ familyName: family.familyName, member });
+            unregistered.push({ familyName: family.familyName, member, magicLink: family.initialMagicLink });
           }
         }
       });
@@ -276,8 +282,8 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const handleFamilyInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteForm.familyName.trim() || inviteForm.emails.some(e => !e.trim())) {
-      toast.error("Please fill in family name and at least one email.");
+    if (!inviteForm.familyName.trim() || !inviteForm.firstName.trim() || inviteForm.emails.some(e => !e.trim())) {
+      toast.error("Please fill in first name, family name and at least one email.");
       return;
     }
 
@@ -291,7 +297,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       batch.set(familyRef, {
         familyName: inviteForm.familyName.trim(),
         members: [{
-          name: inviteForm.familyName.trim(), // Placeholder
+          name: inviteForm.firstName.trim(),
           email: inviteForm.emails[0],
           role: "Primary Adult"
         }],
@@ -319,10 +325,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       setLastInvite({ 
         familyName: inviteForm.familyName.trim(), 
         emails: inviteForm.emails.filter(e => e.trim()), 
-        code 
-      });
+        code,
+        firstName: inviteForm.firstName.trim()
+      } as any);
       toast.success(`Invite created! Code: ${code}`);
-      setInviteForm({ familyName: '', emails: [''] });
+      setInviteForm({ familyName: '', firstName: '', emails: [''] });
     } catch (error) {
       console.error(error);
       handleFirestoreError(error, OperationType.WRITE, 'families/invite_batch');
@@ -483,13 +490,105 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  const openInviteEmail = (familyName: string, emails: string[], code: string) => {
+  const openInviteEmail = (familyName: string, emails: string[], code: string, firstName?: string) => {
     const subject = encodeURIComponent('Your Invitation to the Redeemer Directory');
+    const greeting = firstName ? `Hi ${firstName},` : `Hello ${familyName} Family!`;
     const body = encodeURIComponent(
-      `Hello! You've been invited to join the new, secure Redeemer Directory. To set up your family's profile and manage your contact information, please click the secure magic link below to create your login. You can share this link with other adults or teens in your household so they can create their own logins as well.\n\nhttps://directory.redeemeratl.org/invite?code=${code}`
+      `${greeting}\n\nYou've been invited to join the new, secure Redeemer Directory. To set up your family's profile and manage your contact information, please click the secure magic link below to create your login. You can share this link with other adults or teens in your household so they can create their own logins as well.\n\nhttps://directory.redeemeratl.org/invite?code=${code}`
     );
-    window.location.href = `mailto:${emails.join(',')}?subject=${subject}&body=${body}`;
+    window.open(`mailto:${emails.join(',')}?subject=${subject}&body=${body}`, '_blank');
   };
+
+  const handleConnectUser = async (userId: string, familyId: string) => {
+    const user = allUsers.find(u => u.id === userId);
+    const family = families.find(f => f.id === familyId);
+    if (!user || !family) return;
+
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Update user profile
+      batch.update(doc(db, 'users', userId), {
+        familyId: familyId,
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Update family
+      const memberUids = Array.from(new Set([...(family.memberUids || []), userId]));
+      
+      // Check if we can link to a specific member record by email
+      let updatedMembers = [...(family.members || [])];
+      const memberIndex = updatedMembers.findIndex(m => m.email?.toLowerCase().trim() === user.email?.toLowerCase().trim());
+      if (memberIndex !== -1) {
+         updatedMembers[memberIndex] = { ...updatedMembers[memberIndex], uid: userId };
+      }
+
+      batch.update(doc(db, 'families', familyId), {
+        memberUids,
+        members: updatedMembers,
+        updatedAt: serverTimestamp()
+      });
+
+      await batch.commit();
+      toast.success(`Connected ${user.email} to ${family.familyName} family`);
+      setConnectingUserId(null);
+    } catch (error) {
+      console.error(error);
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      toast.error("Connection failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnlinkUser = async (userId: string) => {
+    const user = allUsers.find(u => u.id === userId);
+    if (!user || !user.familyId) return;
+
+    const family = families.find(f => f.id === user.familyId);
+    
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Update user profile
+      batch.update(doc(db, 'users', userId), {
+        familyId: null,
+        updatedAt: serverTimestamp()
+      });
+
+      // 2. Update family if found
+      if (family) {
+        const memberUids = (family.memberUids || []).filter((id: string) => id !== userId);
+        
+        let updatedMembers = [...(family.members || [])];
+        const memberIndex = updatedMembers.findIndex(m => m.uid === userId);
+        if (memberIndex !== -1) {
+           const { uid, ...rest } = updatedMembers[memberIndex];
+           updatedMembers[memberIndex] = rest;
+        }
+
+        batch.update(doc(db, 'families', family.id), {
+          memberUids,
+          members: updatedMembers,
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      await batch.commit();
+      toast.success("User unlinked from family");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      toast.error("Unlink failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredConnectFamilies = families.filter(f => 
+    f.familyName.toLowerCase().includes(familySearch.toLowerCase())
+  );
 
   return (
     <div className="fixed inset-0 bg-stone/40 backdrop-blur-md z-[60] flex flex-col">
@@ -592,16 +691,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </div>
 
                     <form onSubmit={handleFamilyInvite} className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Family Name</label>
-                        <input 
-                          type="text" 
-                          placeholder="e.g. The Miller Family"
-                          value={inviteForm.familyName}
-                          onChange={(e) => setInviteForm({ ...inviteForm, familyName: e.target.value })}
-                          className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
-                          required
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Primary First Name</label>
+                          <input 
+                            type="text" 
+                            placeholder="e.g. John"
+                            value={inviteForm.firstName}
+                            onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })}
+                            className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Family (Last) Name</label>
+                          <input 
+                            type="text" 
+                            placeholder="e.g. Miller"
+                            value={inviteForm.familyName}
+                            onChange={(e) => setInviteForm({ ...inviteForm, familyName: e.target.value })}
+                            className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                            required
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-4">
@@ -671,7 +783,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             </div>
                             
                             <button 
-                              onClick={() => openInviteEmail(lastInvite.familyName, lastInvite.emails, lastInvite.code)}
+                              onClick={() => openInviteEmail(lastInvite.familyName, lastInvite.emails, lastInvite.code, (lastInvite as any).firstName)}
                               className="bg-white text-sage border border-sage/30 px-8 py-4 rounded-full font-bold uppercase tracking-widest text-[10px] hover:bg-sage hover:text-white transition-all flex items-center gap-2 shadow-sm"
                             >
                               Send Invitation Email <ExternalLink size={14} />
@@ -717,7 +829,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <p className="text-[10px] text-stone-light font-medium italic">
                                 Auth: {invite.invitedEmails.map((email, idx) => (
                                   <React.Fragment key={email}>
-                                    <a href={`mailto:${email}`} className="hover:text-sage transition-colors underline decoration-stone-border/30 hover:decoration-sage/30">{email}</a>
+                                    <a href={`mailto:${email}`} target="_blank" rel="noopener noreferrer" className="hover:text-sage transition-colors underline decoration-stone-border/30 hover:decoration-sage/30">{email}</a>
                                     {idx < invite.invitedEmails.length - 1 ? ', ' : ''}
                                   </React.Fragment>
                                 ))}
@@ -832,12 +944,25 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           <tbody className="divide-y divide-stone-border">
                             {families.map(family => (
                               <tr key={family.id} className="hover:bg-sage/5 transition-colors group">
-                                <td className="p-6 font-semibold text-stone">{family.familyName}</td>
+                                <td className="p-6 font-semibold text-stone break-words [overflow-wrap:anywhere]">
+                                  {family.members?.length === 1 
+                                    ? `${family.members[0].name} ${family.familyName}` 
+                                    : `The ${family.familyName} Family`}
+                                </td>
                                 <td className="p-6 text-sm text-stone-light">
                                   {family.members?.map(m => m.name).join(', ')}
                                 </td>
                                 <td className="p-6 text-right">
                                   <div className="flex flex-col sm:flex-row justify-end gap-2 transition-all">
+                                    <button 
+                                      onClick={() => {
+                                        setEditingFamily(family);
+                                        setIsEditFormOpen(true);
+                                      }}
+                                      className="font-bold text-[10px] uppercase tracking-widest px-3 py-2 rounded-lg bg-stone text-white hover:bg-stone/90 transition-all whitespace-nowrap flex items-center justify-center gap-2"
+                                    >
+                                      <Edit size={12} /> Edit
+                                    </button>
                                     {family.initialMagicLink && (
                                       <button 
                                         onClick={() => {
@@ -1075,7 +1200,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <div className="p-6 space-y-4">
                           <div>
                             <p className="text-[10px] uppercase tracking-widest font-bold text-stone-light mb-1 text-center md:text-left">Family Unit</p>
-                            <p className="font-serif text-xl text-stone text-center md:text-left break-words [overflow-wrap:anywhere]">The {family.familyName} Family</p>
+                            <p className="font-serif text-xl text-stone text-center md:text-left break-words [overflow-wrap:anywhere]">
+                              {family.members?.length === 1 
+                                ? `${family.members[0].name} ${family.familyName}` 
+                                : `The ${family.familyName} Family`}
+                            </p>
                           </div>
                           <div className="flex flex-col sm:flex-row gap-3">
                             <button 
@@ -1127,7 +1256,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         <tr key={request.id} className="hover:bg-sage/5 transition-colors group">
                           <td className="p-6">
                             <p className="font-bold text-stone">{request.name}</p>
-                            <a href={`mailto:${request.email}`} className="text-xs text-stone-light hover:text-sage transition-colors">{request.email}</a>
+                            <a href={`mailto:${request.email}`} target="_blank" rel="noopener noreferrer" className="text-xs text-stone-light hover:text-sage transition-colors">{request.email}</a>
                           </td>
                           <td className="p-6 text-sm text-stone-light max-w-xs truncate">
                             {request.message || <span className="italic opacity-50">No message</span>}
@@ -1150,7 +1279,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                     onClick={() => {
                                       const subject = encodeURIComponent('Your Redeemer Directory Invite Code');
                                       const body = encodeURIComponent(`Hi ${request.name},\n\nYour request for access to the Redeemer Directory has been approved! Use the code below to join:\n\nCode: ${request.approvedCode}\n\nYou can join here: https://directory.redeemeratl.org/invite?code=${request.approvedCode}\n\nWelcome to the directory!`);
-                                      window.location.href = `mailto:${request.email}?subject=${subject}&body=${body}`;
+                                      window.open(`mailto:${request.email}?subject=${subject}&body=${body}`, '_blank');
                                     }}
                                     className="p-1.5 text-sage hover:bg-sage/10 rounded-lg transition-all"
                                     title="Send Code Email"
@@ -1229,17 +1358,43 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   <div className="divide-y divide-stone-border">
                     {allUsers.map(u => (
                       <div key={u.id} className="p-6 flex flex-col sm:flex-row items-center justify-between gap-6 hover:bg-sage/5 transition-colors">
-                        <div className="flex items-center gap-4 w-full sm:w-auto">
-                           <div className={`p-3 rounded-full ${u.role === 'admin' ? 'bg-sage text-white' : 'bg-stone-border text-stone-light'}`}>
-                             {u.role === 'admin' ? <UserCheck size={20} /> : <Users size={20} />}
-                           </div>
-                           <div className="min-w-0">
-                             <p className="font-bold text-stone truncate">{u.email}</p>
-                             <p className="text-[10px] uppercase tracking-widest text-stone-light font-bold">
-                                Role: <span className={u.role === 'admin' ? 'text-sage' : ''}>{u.role}</span>
-                             </p>
-                           </div>
-                        </div>
+                         <div className="flex items-center gap-4 w-full sm:w-auto">
+                            <div className={`p-3 rounded-full ${u.role === 'admin' ? 'bg-sage text-white' : 'bg-stone-border text-stone-light'}`}>
+                              {u.role === 'admin' ? <UserCheck size={20} /> : <Users size={20} />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-bold text-stone truncate">{u.email}</p>
+                              <div className="flex flex-wrap items-center gap-2 mt-1">
+                                <p className="text-[10px] uppercase tracking-widest text-stone-light font-bold">
+                                   Role: <span className={u.role === 'admin' ? 'text-sage' : ''}>{u.role}</span>
+                                </p>
+                                {u.familyId ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-stone-light opacity-30">•</span>
+                                    <p className="text-[10px] uppercase tracking-widest text-sage font-bold">
+                                      Family: {families.find(f => f.id === u.familyId)?.familyName || 'Unknown'}
+                                    </p>
+                                    <button 
+                                      onClick={() => handleUnlinkUser(u.id)}
+                                      className="text-[10px] uppercase font-bold text-terracotta hover:underline"
+                                    >
+                                      Unlink
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-stone-light opacity-30">•</span>
+                                    <button 
+                                      onClick={() => setConnectingUserId(u.id)}
+                                      className="text-[10px] uppercase font-bold text-sage hover:underline flex items-center gap-1"
+                                    >
+                                      <Link size={10} /> Link to Family
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                         </div>
                         
                         <div className="flex items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
                            <button
@@ -1330,7 +1485,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-border">
-                        {unregisteredMembers.map(({ familyName, member }, i) => (
+                        {unregisteredMembers.map(({ familyName, member, magicLink }, i) => (
                           <tr key={i} className="hover:bg-cream/50 transition-colors">
                             <td className="p-6 font-semibold text-stone">{member.name}</td>
                             <td className="p-6 text-sm text-stone-light font-serif italic text-lg">{familyName}</td>
@@ -1344,8 +1499,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <button 
                                 onClick={() => {
                                   const subject = encodeURIComponent('Join the Redeemer Directory');
-                                  const body = encodeURIComponent(`Hi ${member.name},\n\nWe noticed you are listed in our family directory but haven't created your login yet. Join us here to update your info and photo:\n\nhttps://directory.redeemeratl.org`);
-                                  window.location.href = `mailto:${member.email}?subject=${subject}&body=${body}`;
+                                  const firstName = member.name.split(' ')[0];
+                                  const body = encodeURIComponent(`Hi ${firstName},\n\nWe noticed you are listed in our family directory but haven't created your login yet. Join us here to update your info and photo:\n\n${magicLink || 'https://directory.redeemeratl.org'}\n\nWelcome to the directory!`);
+                                  window.open(`mailto:${member.email}?subject=${subject}&body=${body}`, '_blank');
                                 }}
                                 className="px-4 py-2 bg-sage/10 text-sage hover:bg-sage hover:text-white rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest"
                               >
@@ -1363,6 +1519,78 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
           </AnimatePresence>
         </main>
       </div>
+
+      <AnimatePresence>
+        {connectingUserId && (
+          <div className="fixed inset-0 bg-stone/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-bg-natural w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-stone-border flex justify-between items-center bg-white">
+                <h3 className="text-2xl font-serif text-stone">Link User to Family</h3>
+                <button onClick={() => setConnectingUserId(null)} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-stone-light">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light mb-2">Target User</label>
+                  <p className="font-bold text-stone">{allUsers.find(u => u.id === connectingUserId)?.email}</p>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Search Family</label>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-light" size={18} />
+                    <input 
+                      type="text"
+                      placeholder="Type family name..."
+                      value={familySearch}
+                      onChange={(e) => setFamilySearch(e.target.value)}
+                      className="w-full pl-12 pr-4 py-4 bg-white border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                    {filteredConnectFamilies.map(family => (
+                      <button
+                        key={family.id}
+                        onClick={() => handleConnectUser(connectingUserId, family.id)}
+                        className="w-full p-4 rounded-xl text-left border border-stone-border hover:border-sage hover:bg-sage/5 transition-all flex items-center justify-between group"
+                      >
+                        <span className="font-medium text-stone">{family.familyName}</span>
+                        <Link size={16} className="text-stone-light group-hover:text-sage opacity-0 group-hover:opacity-100 transition-all" />
+                      </button>
+                    ))}
+                    {filteredConnectFamilies.length === 0 && (
+                      <p className="text-center py-4 text-stone-light italic text-sm">No families found</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isEditFormOpen && (
+          <FamilyForm 
+            family={editingFamily} 
+            onClose={() => {
+              setIsEditFormOpen(false);
+              setEditingFamily(null);
+            }} 
+            onSave={() => {
+              setIsEditFormOpen(false);
+              setEditingFamily(null);
+            }} 
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

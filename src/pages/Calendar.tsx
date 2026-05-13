@@ -103,29 +103,36 @@ export default function Calendar() {
             const m = parseInt(parts[1]);
             const d = parseInt(parts[2]);
             if (!isNaN(m) && !isNaN(d)) {
+                const displayLabel = family.members?.length === 1 
+                  ? `${family.members[0].name} ${family.familyName}'s Anniversary`
+                  : `The ${family.familyName} Family Anniversary`;
+                const entityName = family.members?.length === 1
+                  ? `${family.members[0].name} ${family.familyName}`
+                  : `The ${family.familyName} Family`;
+                
                 allEvents.push({
                   date: new Date(currentYear, m - 1, d),
                   originalDate: family.weddingAnniversary,
                   type: 'anniversary',
-                  label: `The ${family.familyName} Family Anniversary`,
+                  label: displayLabel,
                   familyId: family.id,
-                  entityName: `The ${family.familyName} Family`
+                  entityName: entityName
                 });
                 allEvents.push({
                   date: new Date(currentYear - 1, m - 1, d),
                   originalDate: family.weddingAnniversary,
                   type: 'anniversary',
-                  label: `The ${family.familyName} Family Anniversary`,
+                  label: displayLabel,
                   familyId: family.id,
-                  entityName: `The ${family.familyName} Family`
+                  entityName: entityName
                 });
                 allEvents.push({
                   date: new Date(currentYear + 1, m - 1, d),
                   originalDate: family.weddingAnniversary,
                   type: 'anniversary',
-                  label: `The ${family.familyName} Family Anniversary`,
+                  label: displayLabel,
                   familyId: family.id,
-                  entityName: `The ${family.familyName} Family`
+                  entityName: entityName
                 });
             }
           }

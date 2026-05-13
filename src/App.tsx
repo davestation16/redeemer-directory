@@ -7,6 +7,7 @@ import FamilyDetail from './pages/FamilyDetail';
 import AdminDashboard from './pages/AdminDashboard';
 import InviteRequired from './components/InviteRequired';
 import { Toaster } from 'sonner';
+import InstallPWA from './components/InstallPWA';
 
 function AppContent() {
   const { user, profile, loading, isAdmin } = useAuth();
@@ -63,6 +64,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <InstallPWA />
         <AppContent />
         <Toaster position="top-center" />
       </AuthProvider>

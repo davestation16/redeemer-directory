@@ -173,6 +173,8 @@ export default function InviteRequired() {
         <div className="mt-8 pt-8 border-t border-stone-border flex flex-col gap-4">
           <a 
             href="mailto:ruby@redeemeratl.org?subject=Missing Invite Code"
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-xs text-sage font-semibold flex items-center justify-center gap-2 hover:text-stone transition-colors"
           >
             <Mail size={14} /> I don't have a code

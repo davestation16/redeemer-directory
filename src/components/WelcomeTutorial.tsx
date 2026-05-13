@@ -50,7 +50,7 @@ export const WelcomeTutorial: React.FC<WelcomeTutorialProps> = ({ onComplete }) 
 
           <div className="p-10 space-y-8">
             <p className="text-stone-light leading-relaxed text-center">
-              To get started, please visit the <strong className="text-stone">"My Family"</strong> page to add your members, update your contact info, and upload a family photo.
+              To get started, please visit the <strong className="text-stone">"Edit My Details"</strong> page to add your members, update your contact info, and upload a family photo.
             </p>
 
             <div className="grid grid-cols-3 gap-4 py-4">

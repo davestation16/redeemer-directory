@@ -76,7 +76,10 @@ async function startServer() {
             ical.push(`DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`);
             ical.push(`DTSTART;VALUE=DATE:${currentYear}${m}${d}`);
             ical.push(`DTEND;VALUE=DATE:${currentYear}${m}${d}`);
-            ical.push(`SUMMARY:The ${family.familyName} Family Anniversary`);
+            const summary = family.members?.length === 1 
+              ? `${family.members[0].name} ${family.familyName}'s Anniversary`
+              : `The ${family.familyName} Family Anniversary`;
+            ical.push(`SUMMARY:${summary}`);
             ical.push("RRULE:FREQ=YEARLY");
             ical.push("DESCRIPTION:Church Family Directory");
             ical.push("TRANSP:TRANSPARENT");

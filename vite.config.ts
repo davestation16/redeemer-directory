@@ -11,15 +11,19 @@ export default defineConfig(({mode}) => {
       react(), 
       tailwindcss(),
       VitePWA({
-        registerType: 'prompt',
+        registerType: 'autoUpdate',
         includeAssets: ['logo.png', 'logo.svg'],
         manifest: {
+          id: 'com.redeemer.directory',
           name: 'Redeemer Community Church Directory',
           short_name: 'Redeemer',
           description: 'A secure, invite-only directory for Redeemer Community Church families.',
           theme_color: '#1a1a1a',
           background_color: '#ffffff',
           display: 'standalone',
+          orientation: 'portrait',
+          scope: '/',
+          start_url: '/',
           icons: [
             {
               src: '/logo.png',
@@ -35,7 +39,49 @@ export default defineConfig(({mode}) => {
               src: '/logo.png',
               sizes: '512x512',
               type: 'image/png',
-              purpose: 'any maskable'
+              purpose: 'any'
+            },
+            {
+              src: '/logo.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable'
+            }
+          ]
+        },
+        devOptions: {
+          enabled: true
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'firebase-firestore-cache',
+                expiration: {
+                  maxEntries: 100,
+                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'firebase-storage-cache',
+                expiration: {
+                  maxEntries: 50,
+                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
             }
           ]
         }
