@@ -1,0 +1,87 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Georgia", ui-serif, serif;
+  --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  
+  --color-bg-natural: #F8F7F2;
+  --color-sage: #5A6251;
+  --color-sage-light: #F0F2EE;
+  --color-terracotta: #9B5B3B;
+  --color-cream: #FAF9F6;
+  --color-stone: #4A4636;
+  --color-stone-light: #6D695C;
+  --color-stone-border: #E8E7E0;
+  
+  --shadow-card: 0 4px 12px rgba(125, 132, 113, 0.08);
+}
+
+@layer base {
+  body {
+    @apply bg-bg-natural text-stone font-sans;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 1.5cm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .print-hidden,
+  aside,
+  nav,
+  button,
+  header,
+  input,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .family-print-page {
+    page-break-after: always;
+    display: block !important;
+    width: 100% !important;
+    padding: 2cm;
+    background: white;
+  }
+
+  .family-print-page:last-child {
+    page-break-after: auto;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+}
+
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}
+
+body {
+  @apply bg-bg-natural text-stone font-sans;
+}
+
+h1, h2, h3, h4 {
+  @apply font-serif;
+}
+

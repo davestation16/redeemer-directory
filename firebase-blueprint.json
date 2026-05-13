@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and roles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "member"] },
+        "familyId": { "type": "string", "description": "ID of the family this user belongs to." },
+        "hasSeenTutorial": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Family": {
+      "title": "Family Directory Entry",
+      "description": "Information about a church family.",
+      "type": "object",
+      "properties": {
+        "familyName": { "type": "string" },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "phone": { "type": "string" },
+              "email": { "type": "string" },
+              "role": { "type": "string", "enum": ["Primary Adult", "Additional Adult/Parent", "Teen", "Child"] },
+              "birthday": { "type": "string", "format": "date", "description": "YYYY-MM-DD" }
+            },
+            "required": ["name", "role"]
+          }
+        },
+        "address": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "photoStatus": { "type": "string", "enum": ["pending", "approved", "rejected", "pending_invite"] },
+        "weddingAnniversary": { "type": "string", "format": "date", "description": "YYYY-MM-DD" },
+        "initialMagicLink": { "type": "string", "description": "Temporary magic link for initial rollout." },
+        "memberUids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "UIDs of users who belong to this family and can edit it."
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["familyName", "members"]
+    },
+    "AccessRequest": {
+      "title": "Access Request",
+      "description": "A request from a non-member to join the directory.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "name", "status", "createdAt"]
+    },
+    "Invite": {
+      "title": "Registration Invite",
+      "description": "A code that allows someone to register for the directory.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "used": { "type": "boolean" },
+        "usedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "used", "createdAt"]
+    },
+    "InviteCode": {
+      "title": "Family Access Code",
+      "description": "A secure access code linked to a specific family record.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "familyId": { "type": "string" },
+        "familyName": { "type": "string" },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "invitedEmails": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["active", "revoked"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "familyId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user auth supplemental data."
+    },
+    "/families/{familyId}": {
+      "schema": "Family",
+      "description": "Collection of church families for the directory."
+    },
+    "/invites/{inviteId}": {
+      "schema": "Invite",
+      "description": "Security tokens for new member registration."
+    },
+    "/requests/{requestId}": {
+      "schema": "AccessRequest",
+      "description": "Access requests for non-members."
+    },
+    "/invite_codes/{inviteCodeId}": {
+      "schema": "InviteCode",
+      "description": "New family-specific access codes."
+    }
+  }
+}

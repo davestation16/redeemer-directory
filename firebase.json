@@ -1,0 +1,27 @@
+{
+  "hosting": {
+    "site": "redeemerdirectory",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "redeemer-directory",
+          "region": "us-west1"
+        }
+      }
+    ]
+  },
+  "firestore": {
+    "database": "ai-studio-8e61d26b-243a-4463-a076-619aed18a6ad",
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}
