@@ -29,7 +29,7 @@
               "name": { "type": "string" },
               "phone": { "type": "string" },
               "email": { "type": "string" },
-              "role": { "type": "string", "enum": ["Primary Adult", "Additional Adult/Parent", "Teen", "Child"] },
+              "role": { "type": "string", "enum": ["Adult", "Teen", "Child"] },
               "birthday": { "type": "string", "format": "date", "description": "YYYY-MM-DD" }
             },
             "required": ["name", "role"]
@@ -91,6 +91,23 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["code", "familyId", "status"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global application configuration and templates.",
+      "type": "object",
+      "properties": {
+        "inviteEmailTemplate": {
+          "type": "object",
+          "properties": {
+            "subject": { "type": "string" },
+            "body": { "type": "string" }
+          },
+          "required": ["subject", "body"]
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["inviteEmailTemplate"]
     }
   },
   "firestore": {
@@ -113,6 +130,10 @@
     "/invite_codes/{inviteCodeId}": {
       "schema": "InviteCode",
       "description": "New family-specific access codes."
+    },
+    "/settings/{settingsId}": {
+      "schema": "SystemSettings",
+      "description": "Global application configuration."
     }
   }
 }

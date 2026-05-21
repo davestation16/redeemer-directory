@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp, orderBy, writeBatch } from 'firebase/firestore';
 import { ref, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Family, Invite, InviteCode, PhotoStatus, AccessRequest, FamilyMemberRole, FamilyMember } from '../types';
+import imageCompression from 'browser-image-compression';
+import { Family, Invite, InviteCode, PhotoStatus, AccessRequest, FamilyMemberRole, FamilyMember, SystemSettings } from '../types';
 import { useAuth } from '../hooks/useAuth';
-import { X, Check, Trash2, Key, Users, Image as ImageIcon, Plus, ArrowLeft, ExternalLink, Database, Inbox, UserCheck, UserX, Mail, Download, Menu, ChevronDown, AlertTriangle, Search, Edit, Link } from 'lucide-react';
+import { X, Check, Trash2, Key, Users, Image as ImageIcon, Plus, ArrowLeft, ExternalLink, Database, Inbox, UserCheck, UserX, Mail, Download, Menu, ChevronDown, AlertTriangle, Search, Edit, Link, Settings, Zap, RefreshCcw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import BulkImport from '../components/BulkImport';
@@ -15,7 +16,7 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ onClose }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'invites' | 'directory' | 'photos' | 'import' | 'requests' | 'admins' | 'cleanup'>('invites');
+  const [activeTab, setActiveTab] = useState<'invites' | 'directory' | 'photos' | 'import' | 'requests' | 'admins' | 'cleanup' | 'settings'>('invites');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCreatingFamily, setIsCreatingFamily] = useState(false);
   const [editingFamily, setEditingFamily] = useState<Family | null>(null);
@@ -25,7 +26,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     weddingAnniversary: '',
     photo: null as File | null,
     members: [
-      { name: '', role: 'Primary Adult' as FamilyMemberRole, email: '', phone: '', birthday: '' }
+      { name: '', role: 'Adult' as FamilyMemberRole, email: '', phone: '', birthday: '' }
     ]
   });
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -35,14 +36,29 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [connectingUserId, setConnectingUserId] = useState<string | null>(null);
   const [familySearch, setFamilySearch] = useState('');
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isFlushing, setIsFlushing] = useState(false);
+  const [optimizationProgress, setOptimizationProgress] = useState({ current: 0, total: 0, success: 0, errors: 0 });
+  const [optimizationLogs, setOptimizationLogs] = useState<string[]>([]);
   
+  // Auto-scroll optimization log to bottom
+  useEffect(() => {
+    if (isOptimizing) {
+      const logContainer = document.getElementById('optimization-log-container');
+      if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+    }
+  }, [optimizationLogs, isOptimizing]);
+
   const pendingPhotos = families.filter(f => f.photoStatus === 'pending');
   
   // New Family Invite State
   const [inviteForm, setInviteForm] = useState({
     familyName: '',
-    firstName: '',
-    emails: ['']
+    adults: [{ firstName: '', email: '' }]
   });
   
   const [loading, setLoading] = useState(true);
@@ -83,6 +99,22 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       console.error("Users fetch error:", error);
     });
 
+    // Fetch system settings
+    const settingsUnsub = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
+      if (snapshot.exists()) {
+        setSettings({ id: snapshot.id, ...snapshot.data() } as SystemSettings);
+      } else {
+        // Initialize default settings if they don't exist
+        const defaultSettings: Partial<SystemSettings> = {
+          inviteEmailTemplate: {
+            subject: 'Your Invitation to the Redeemer Directory',
+            body: "Hi {{names}},\n\nYou've been invited to join the new, secure Redeemer Directory. To set up your family's profile and manage your contact information, please click the secure magic link below to create your login. You can share this link with other adults or teens in your household so they can create their own logins as well.\n\n{{link}}"
+          }
+        };
+        setSettings(defaultSettings as SystemSettings);
+      }
+    });
+
     setLoading(false);
     return () => {
       invitesUnsub();
@@ -90,6 +122,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       familiesUnsub();
       requestsUnsub();
       usersUnsub();
+      settingsUnsub();
     };
   }, []);
 
@@ -188,7 +221,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
       // 1. Handle Photo Upload
       if (manualFamilyForm.photo) {
-        const storageRef = ref(storage, `families/${familyRef.id}/photo`);
+        const storageRef = ref(storage, `families/${familyRef.id}/photo_${Date.now()}`);
         const snapshot = await uploadBytes(storageRef, manualFamilyForm.photo);
         photoUrl = await getDownloadURL(snapshot.ref);
       }
@@ -213,7 +246,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
         familyName: '',
         weddingAnniversary: '',
         photo: null,
-        members: [{ name: '', role: 'Primary Adult', email: '', phone: '', birthday: '' }]
+        members: [{ name: '', role: 'Adult', email: '', phone: '', birthday: '' }]
       });
 
       // Offer to generate invite link
@@ -261,6 +294,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     setManualFamilyForm(prev => ({ ...prev, members: newMembers }));
   };
 
+  const MonthDayInput = ({ value, onChange, label }: { value?: string, onChange: (val: string) => void, label: string }) => {
+    const [month, day] = (value || '').split('-').slice(-2);
+    
+    const months = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    const handleMonthChange = (newMonth: string) => {
+      const d = day || '01';
+      onChange(`1000-${newMonth.padStart(2, '0')}-${d.padStart(2, '0')}`);
+    };
+
+    const handleDayChange = (newDay: string) => {
+      const m = month || '01';
+      onChange(`1000-${m.padStart(2, '0')}-${newDay.padStart(2, '0')}`);
+    };
+
+    return (
+      <div className="space-y-1">
+        <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">{label}</label>
+        <div className="grid grid-cols-2 gap-2">
+          <select 
+            value={month || ''} 
+            onChange={(e) => handleMonthChange(e.target.value)}
+            className="w-full px-3 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light appearance-none"
+          >
+            <option value="">Month</option>
+            {months.map((m, i) => (
+              <option key={m} value={(i + 1).toString().padStart(2, '0')}>{m}</option>
+            ))}
+          </select>
+          <select 
+            value={day || ''} 
+            onChange={(e) => handleDayChange(e.target.value)}
+            className="w-full px-3 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light appearance-none"
+          >
+            <option value="">Day</option>
+            {Array.from({ length: 31 }, (_, i) => (
+              <option key={i + 1} value={(i + 1).toString().padStart(2, '0')}>{i + 1}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    );
+  };
+
   const handleRevokeClick = (id: string) => {
     if (confirmingRevoke === id) {
       deleteCode(id);
@@ -282,8 +362,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
   const handleFamilyInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteForm.familyName.trim() || !inviteForm.firstName.trim() || inviteForm.emails.some(e => !e.trim())) {
-      toast.error("Please fill in first name, family name and at least one email.");
+    const activeAdults = inviteForm.adults.filter(a => a.firstName.trim() && a.email.trim());
+    if (!inviteForm.familyName.trim() || activeAdults.length === 0) {
+      toast.error("Please fill in family name and at least one adult (First Name + Email).");
       return;
     }
 
@@ -296,11 +377,11 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       const familyRef = doc(collection(db, "families"));
       batch.set(familyRef, {
         familyName: inviteForm.familyName.trim(),
-        members: [{
-          name: inviteForm.firstName.trim(),
-          email: inviteForm.emails[0],
-          role: "Primary Adult"
-        }],
+        members: activeAdults.map(a => ({
+          name: a.firstName.trim(),
+          email: a.email.trim().toLowerCase(),
+          role: "Adult"
+        })),
         photoStatus: "pending_invite",
         initialMagicLink: `https://directory.redeemeratl.org/invite?code=${code}`,
         memberUids: [],
@@ -310,13 +391,14 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
 
       // 2. Create Invite Code Document
       const inviteRef = doc(collection(db, "invite_codes"));
+      const invitedEmails = activeAdults.map(a => a.email.trim().toLowerCase());
       batch.set(inviteRef, {
         code,
         familyId: familyRef.id,
         familyName: inviteForm.familyName.trim(),
         maxUses: 10,
         usedCount: 0,
-        invitedEmails: inviteForm.emails.filter(e => e.trim()),
+        invitedEmails,
         createdAt: serverTimestamp(),
         status: "active"
       });
@@ -324,12 +406,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       await batch.commit();
       setLastInvite({ 
         familyName: inviteForm.familyName.trim(), 
-        emails: inviteForm.emails.filter(e => e.trim()), 
+        emails: invitedEmails, 
         code,
-        firstName: inviteForm.firstName.trim()
-      } as any);
+        adultNames: activeAdults.map(a => a.firstName.trim())
+      });
       toast.success(`Invite created! Code: ${code}`);
-      setInviteForm({ familyName: '', firstName: '', emails: [''] });
+      setInviteForm({ familyName: '', adults: [{ firstName: '', email: '' }] });
     } catch (error) {
       console.error(error);
       handleFirestoreError(error, OperationType.WRITE, 'families/invite_batch');
@@ -339,12 +421,12 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  const addEmail = () => setInviteForm(prev => ({ ...prev, emails: [...prev.emails, ''] }));
-  const removeEmail = (index: number) => setInviteForm(prev => ({ ...prev, emails: prev.emails.filter((_, i) => i !== index) }));
-  const updateEmail = (index: number, value: string) => {
-    const newEmails = [...inviteForm.emails];
-    newEmails[index] = value;
-    setInviteForm(prev => ({ ...prev, emails: newEmails }));
+  const addAdult = () => setInviteForm(prev => ({ ...prev, adults: [...prev.adults, { firstName: '', email: '' }] }));
+  const removeAdult = (index: number) => setInviteForm(prev => ({ ...prev, adults: prev.adults.filter((_, i) => i !== index) }));
+  const updateAdult = (index: number, field: 'firstName' | 'email', value: string) => {
+    const newAdults = [...inviteForm.adults];
+    newAdults[index] = { ...newAdults[index], [field]: value };
+    setInviteForm(prev => ({ ...prev, adults: newAdults }));
   };
 
   const handleRequestAction = async (requestId: string, status: 'approved' | 'rejected') => {
@@ -423,9 +505,13 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
       } else {
         // 1. Delete from Storage
         try {
-          // Based on MyFamilyDashboard, photos are stored at: families/{familyId}/photo
-          const storageRef = ref(storage, `families/${familyId}/photo`);
-          await deleteObject(storageRef);
+          const family = families.find(f => f.id === familyId);
+          if (family?.photoUrl) {
+            // Use the photoUrl to get the reference for deletion
+            // This handles dynamic paths like photo_123456789
+            const storageRef = ref(storage, family.photoUrl);
+            await deleteObject(storageRef);
+          }
         } catch (storageError) {
           console.error("Storage deletion error:", storageError);
           // If the file doesn't exist, we still want to clean up the Firestore record
@@ -490,13 +576,261 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
     }
   };
 
-  const openInviteEmail = (familyName: string, emails: string[], code: string, firstName?: string) => {
-    const subject = encodeURIComponent('Your Invitation to the Redeemer Directory');
-    const greeting = firstName ? `Hi ${firstName},` : `Hello ${familyName} Family!`;
-    const body = encodeURIComponent(
-      `${greeting}\n\nYou've been invited to join the new, secure Redeemer Directory. To set up your family's profile and manage your contact information, please click the secure magic link below to create your login. You can share this link with other adults or teens in your household so they can create their own logins as well.\n\nhttps://directory.redeemeratl.org/invite?code=${code}`
-    );
-    window.open(`mailto:${emails.join(',')}?subject=${subject}&body=${body}`, '_blank');
+  const formatAdultNames = (names: string[]) => {
+    if (names.length === 0) return '';
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    
+    // For 3+ use oxford comma
+    const last = names[names.length - 1];
+    const others = names.slice(0, names.length - 1);
+    return `${others.join(', ')}, and ${last}`;
+  };
+
+  const openInviteEmail = (familyName: string, emails: string[], code: string, adultNames?: string[]) => {
+    const defaultSubject = 'Your Invitation to the Redeemer Directory';
+    const defaultBody = "Hi {{names}},\n\nYou've been invited to join the new, secure Redeemer Directory. To set up your family's profile and manage your contact information, please click the secure magic link below to create your login. You can share this link with other adults or teens in your household so they can create their own logins as well.\n\n{{link}}";
+
+    const subjectTemplate = settings?.inviteEmailTemplate?.subject || defaultSubject;
+    const bodyTemplate = settings?.inviteEmailTemplate?.body || defaultBody;
+    const link = `https://directory.redeemeratl.org/invite?code=${code}`;
+    
+    const formattedNames = adultNames && adultNames.length > 0 
+      ? formatAdultNames(adultNames) 
+      : `${familyName} Family`;
+
+    const processedSubject = subjectTemplate
+      .replace(/{{names}}/g, formattedNames)
+      .replace(/{{familyName}}/g, familyName)
+      .replace(/{{link}}/g, link);
+
+    const processedBody = bodyTemplate
+      .replace(/{{names}}/g, formattedNames)
+      .replace(/{{familyName}}/g, familyName)
+      .replace(/{{link}}/g, link);
+
+    window.open(`mailto:${emails.join(',')}?subject=${encodeURIComponent(processedSubject)}&body=${encodeURIComponent(processedBody)}`, '_blank');
+  };
+
+  const saveSettings = async () => {
+    if (!settings) return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(db, 'settings', 'global'), {
+        ...settings,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      toast.success("Settings saved successfully");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/global');
+      toast.error("Failed to save settings");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const runImageOptimization = async () => {
+    setOptimizationLogs(["[System]: Starting optimization batch..."]);
+    const familiesToOptimize = families.filter(f => f.photoUrl);
+    setOptimizationLogs(prev => [...prev, `[System]: Found ${familiesToOptimize.length} families with photos.`]);
+
+    if (familiesToOptimize.length === 0) {
+      toast.info("No photos found to optimize.");
+      return;
+    }
+
+    setIsOptimizing(true);
+    setOptimizationProgress({ current: 0, total: familiesToOptimize.length, success: 0, errors: 0 });
+
+    // Small delay to allow UI to render the "Starting" state
+    setTimeout(async () => {
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < familiesToOptimize.length; i++) {
+        const family = familiesToOptimize[i];
+        const logPrefix = family.familyName;
+        
+        try {
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Initializing optimization...`]);
+          setOptimizationProgress(prev => ({ ...prev, current: i + 1 }));
+          
+          // 1. Fetch fresh image URL via storage SDK to ensure token is valid
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Refreshing download URL...`]);
+          let photoUrl = family.photoUrl;
+          if (photoUrl?.includes('firebasestorage')) {
+            try {
+              // Try to get a fresh URL using the existing URL as a reference
+              const storageRef = ref(storage, photoUrl);
+              photoUrl = await getDownloadURL(storageRef);
+            } catch (authError) {
+              console.warn(`[OPTIMIZE]: Token refresh failed for ${family.familyName}, falling back to stored URL`, authError);
+            }
+          }
+
+          if (!photoUrl) {
+            setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Skipped (No URL)`]);
+            continue;
+          }
+
+          // 2. Fetch image via proxy to avoid CORS
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Fetching image...`]);
+          const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(photoUrl)}`;
+          const response = await fetch(proxyUrl).catch(err => {
+            console.warn(`[OPTIMIZE]: Proxy fetch failed for ${family.familyName}`, err);
+            throw new Error("Proxy fetch failed");
+          });
+
+           if (!response.ok) throw new Error(`Fetch failed: ${response.statusText} (${response.status})`);
+          
+          const contentType = response.headers.get("content-type");
+          if (contentType && !contentType.includes('image')) {
+             throw new Error(`Invalid content type: ${contentType}`);
+          }
+
+          const blob = await response.blob();
+          if (blob.size < 100) {
+             throw new Error(`Fetched file is too small to be an image (${blob.size} bytes)`);
+          }
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Fetched original image (${(blob.size / 1024).toFixed(1)} KB)`]);
+          
+          // 2. Compress
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Compressing & converting to JPEG...`]);
+          const options = {
+            maxSizeMB: 1,
+            maxWidthOrHeight: 1200,
+            useWebWorker: true,
+            fileType: 'image/jpeg' as const
+          };
+          const compressedFile = await imageCompression(blob as any, options);
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Optimized to ${(compressedFile.size / 1024).toFixed(1)} KB`]);
+          
+          // 3. Re-upload
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Uploading to storage...`]);
+          const storageRef = ref(storage, `families/${family.id}/photo_${Date.now()}`);
+          const snapshot = await uploadBytes(storageRef, compressedFile, { contentType: 'image/jpeg' });
+          const newUrl = await getDownloadURL(snapshot.ref);
+          
+          // 4. Update Firestore
+          setOptimizationLogs(prev => [...prev, `[${logPrefix}]: Updating database...`]);
+          await updateDoc(doc(db, 'families', family.id), {
+            photoUrl: newUrl,
+            photoStatus: 'approved',
+            updatedAt: serverTimestamp()
+          });
+          
+          successCount++;
+          setOptimizationProgress(prev => ({ ...prev, success: successCount }));
+          setOptimizationLogs(prev => [...prev, `✅ [${logPrefix}]: Successfully optimized.`]);
+        } catch (error) {
+          console.error(`[OPTIMIZE]: Error for ${family.familyName}:`, error);
+          errorCount++;
+          setOptimizationProgress(prev => ({ ...prev, errors: errorCount }));
+          setOptimizationLogs(prev => [...prev, `❌ [${logPrefix}]: Failed - ${error instanceof Error ? error.message : 'Unknown error'}`]);
+        }
+      }
+
+      setIsOptimizing(false);
+      setOptimizationLogs(prev => [...prev, `[System]: Batch complete. ${successCount} succeeded, ${errorCount} failed.`]);
+      toast.success(`Image optimization complete!`);
+    }, 100);
+  };
+
+  const repairAndRefreshPhotos = async () => {
+    const familiesToRepair = families.filter(f => f.photoUrl);
+    if (familiesToRepair.length === 0) {
+      toast.info("No families found with photos to repair.");
+      return;
+    }
+
+    setLoading(true);
+    setOptimizationLogs(["[Repair]: Starting repair and URL refresh..."]);
+    let successCount = 0;
+    let errorCount = 0;
+
+    try {
+      for (const family of familiesToRepair) {
+        try {
+          if (!family.photoUrl) continue;
+          const storageRef = ref(storage, family.photoUrl);
+          const freshUrl = await getDownloadURL(storageRef);
+          
+          await updateDoc(doc(db, 'families', family.id), {
+            photoUrl: freshUrl,
+            photoStatus: 'approved',
+            updatedAt: serverTimestamp()
+          });
+          successCount++;
+          if (successCount % 5 === 0) {
+            setOptimizationLogs(prev => [...prev, `[Repair]: Processed ${successCount} families...`]);
+          }
+        } catch (err) {
+          console.warn(`[Repair]: Failed for ${family.familyName}`, err);
+          errorCount++;
+        }
+      }
+      toast.success(`Healed ${successCount} photos. ${errorCount} failed refreshed.`);
+      setOptimizationLogs(prev => [...prev, `[Repair]: Complete. ${successCount} healed, ${errorCount} failed.`]);
+    } catch (error) {
+      console.error("[REPAIR]: Fatal error:", error);
+      toast.error("Failed to complete repair.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const flushImageCaches = async () => {
+    setIsFlushing(true);
+    const toastId = toast.loading("Flushing image caches...");
+    
+    try {
+      const batch = writeBatch(db);
+      let count = 0;
+      const timestamp = Date.now();
+
+      families.forEach(family => {
+        if (family.photoUrl) {
+          let newUrl = family.photoUrl;
+          try {
+            // Using URL object to handle parameters correctly
+            const url = new URL(newUrl);
+            url.searchParams.set('cb', timestamp.toString());
+            newUrl = url.toString();
+          } catch (e) {
+            // Fallback for non-standard URLs or cases where new URL() might fail
+            if (newUrl.includes('?')) {
+              if (newUrl.includes('cb=')) {
+                newUrl = newUrl.replace(/cb=\d+/, `cb=${timestamp}`);
+              } else {
+                newUrl = `${newUrl}&cb=${timestamp}`;
+              }
+            } else {
+              newUrl = `${newUrl}?cb=${timestamp}`;
+            }
+          }
+
+          if (newUrl !== family.photoUrl) {
+            batch.update(doc(db, 'families', family.id), {
+              photoUrl: newUrl,
+              updatedAt: serverTimestamp()
+            });
+            count++;
+          }
+        }
+      });
+
+      if (count > 0) {
+        await batch.commit();
+        toast.success(`Image caches flushed for ${count} families`, { id: toastId });
+      } else {
+        toast.info("No photos found to flush", { id: toastId });
+      }
+    } catch (error) {
+      console.error("Flush error:", error);
+      toast.error("Failed to flush image caches", { id: toastId });
+    } finally {
+      setIsFlushing(false);
+    }
   };
 
   const handleConnectUser = async (userId: string, familyId: string) => {
@@ -634,7 +968,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
               bg-stone-border p-1 rounded-2xl shadow-xl lg:shadow-none z-50 lg:z-auto
               flex-col gap-1
             `}>
-              {(['invites', 'directory', 'photos', 'import', 'requests', 'admins', 'cleanup'] as const).map(tab => (
+              {(['invites', 'directory', 'photos', 'import', 'requests', 'admins', 'cleanup', 'settings'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => {
@@ -655,6 +989,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     {tab === 'requests' && <Inbox size={14} />}
                     {tab === 'admins' && <UserCheck size={14} />}
                     {tab === 'cleanup' && <AlertTriangle size={14} />}
+                    {tab === 'settings' && <Settings size={14} />}
                   </span>
                   <span className="flex-1 text-left truncate px-1">
                     {tab === 'import' ? 'Bulk Import' : tab === 'admins' ? 'Manage Admins' : tab === 'cleanup' ? 'Clean-up' : tab}
@@ -690,63 +1025,67 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                       <p className="text-sm text-stone-light">Create a directory entry and generate a secure access code for a household.</p>
                     </div>
 
-                    <form onSubmit={handleFamilyInvite} className="space-y-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Primary First Name</label>
-                          <input 
-                            type="text" 
-                            placeholder="e.g. John"
-                            value={inviteForm.firstName}
-                            onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })}
-                            className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Family (Last) Name</label>
-                          <input 
-                            type="text" 
-                            placeholder="e.g. Miller"
-                            value={inviteForm.familyName}
-                            onChange={(e) => setInviteForm({ ...inviteForm, familyName: e.target.value })}
-                            className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
-                            required
-                          />
-                        </div>
+                    <form onSubmit={handleFamilyInvite} className="space-y-8">
+                      <div className="space-y-2">
+                        <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Family (Last) Name</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Miller"
+                          value={inviteForm.familyName}
+                          onChange={(e) => setInviteForm({ ...inviteForm, familyName: e.target.value })}
+                          className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                          required
+                        />
                       </div>
 
-                      <div className="space-y-4">
+                      <div className="space-y-6">
                         <div className="flex justify-between items-center">
-                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Authorized Emails</label>
+                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Authorized Adults</label>
                           <button 
                             type="button" 
-                            onClick={addEmail}
+                            onClick={addAdult}
                             className="text-[10px] uppercase font-bold text-sage hover:text-stone transition-colors flex items-center gap-1"
                           >
                             <Plus size={12} /> Add Adult
                           </button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {inviteForm.emails.map((email, i) => (
-                            <div key={i} className="relative group">
-                              <input 
-                                type="email" 
-                                placeholder="Adult Email Address"
-                                value={email}
-                                onChange={(e) => updateEmail(i, e.target.value)}
-                                className="w-full pl-4 pr-12 py-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
-                                required
-                              />
-                              {inviteForm.emails.length > 1 && (
+                        
+                        <div className="space-y-4">
+                          {inviteForm.adults.map((adult, i) => (
+                            <div key={i} className="bg-gray-50/50 p-6 rounded-2xl border border-stone-border relative group">
+                              {inviteForm.adults.length > 1 && (
                                 <button 
                                   type="button"
-                                  onClick={() => removeEmail(i)}
-                                  className="absolute right-4 top-1/2 -translate-y-1/2 text-stone-light hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                  onClick={() => removeAdult(i)}
+                                  className="absolute right-4 top-4 text-stone-light hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
                                 >
-                                  <Trash2 size={16} />
+                                  <X size={16} />
                                 </button>
                               )}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">First Name</label>
+                                  <input 
+                                    type="text" 
+                                    placeholder="e.g. John"
+                                    value={adult.firstName}
+                                    onChange={(e) => updateAdult(i, 'firstName', e.target.value)}
+                                    className="w-full p-4 bg-white border border-stone-border rounded-xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-sm"
+                                    required
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Email Address</label>
+                                  <input 
+                                    type="email" 
+                                    placeholder="email@example.com"
+                                    value={adult.email}
+                                    onChange={(e) => updateAdult(i, 'email', e.target.value)}
+                                    className="w-full p-4 bg-white border border-stone-border rounded-xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-sm"
+                                    required
+                                  />
+                                </div>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -783,7 +1122,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             </div>
                             
                             <button 
-                              onClick={() => openInviteEmail(lastInvite.familyName, lastInvite.emails, lastInvite.code, (lastInvite as any).firstName)}
+                              onClick={() => openInviteEmail(lastInvite.familyName, lastInvite.emails, lastInvite.code, (lastInvite as any).adultNames)}
                               className="bg-white text-sage border border-sage/30 px-8 py-4 rounded-full font-bold uppercase tracking-widest text-[10px] hover:bg-sage hover:text-white transition-all flex items-center gap-2 shadow-sm"
                             >
                               Send Invitation Email <ExternalLink size={14} />
@@ -839,7 +1178,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                         </div>
                         <div className="flex items-center gap-2">
                            <button 
-                             onClick={() => openInviteEmail(invite.familyName, invite.invitedEmails, invite.code)}
+                             onClick={() => {
+                               const adultNames = families.find(f => f.id === invite.familyId)?.members?.filter(m => m.role === 'Adult').map(m => m.name) || [];
+                               openInviteEmail(invite.familyName, invite.invitedEmails, invite.code, adultNames);
+                             }}
                              className="p-3 text-sage hover:bg-sage/10 rounded-xl transition-all"
                              title="Resend Invite Email"
                            >
@@ -946,7 +1288,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <tr key={family.id} className="hover:bg-sage/5 transition-colors group">
                                 <td className="p-6 font-semibold text-stone break-words [overflow-wrap:anywhere]">
                                   {family.members?.length === 1 
-                                    ? `${family.members[0].name} ${family.familyName}` 
+                                    ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                                      ? family.members[0].name 
+                                      : `${family.members[0].name} ${family.familyName}`)
                                     : `The ${family.familyName} Family`}
                                 </td>
                                 <td className="p-6 text-sm text-stone-light">
@@ -969,8 +1313,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                           const url = new URL(family.initialMagicLink!);
                                           const code = url.searchParams.get('code');
                                           const emails = family.members?.filter(m => m.email).map(m => m.email!) || [];
+                                          const adultNames = family.members?.filter(m => m.role === 'Adult').map(m => m.name) || [];
                                           if (code) {
-                                            openInviteEmail(family.familyName, emails, code);
+                                            openInviteEmail(family.familyName, emails, code, adultNames);
                                           } else {
                                             toast.error("Could not find invite code in link");
                                           }
@@ -1031,12 +1376,10 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Wedding Anniversary</label>
-                          <input 
-                            type="date" 
+                          <MonthDayInput 
+                            label="Wedding Anniversary"
                             value={manualFamilyForm.weddingAnniversary}
-                            onChange={(e) => setManualFamilyForm({ ...manualFamilyForm, weddingAnniversary: e.target.value })}
-                            className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                            onChange={(val) => setManualFamilyForm({ ...manualFamilyForm, weddingAnniversary: val })}
                           />
                         </div>
                         <div className="md:col-span-2 space-y-2">
@@ -1085,7 +1428,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <button 
                                 type="button" 
                                 onClick={() => removeManualMember(i)}
-                                className="absolute top-6 right-6 p-2 text-stone-light hover:text-red-500 transition-colors bg-white rounded-full shadow-sm md:opacity-0 group-hover:opacity-100"
+                                className="absolute top-6 right-6 w-9 h-9 flex items-center justify-center text-stone-light hover:text-red-500 transition-colors bg-white rounded-full shadow-sm md:opacity-0 group-hover:opacity-100"
                                 disabled={manualFamilyForm.members.length === 1}
                               >
                                 <Trash2 size={16} />
@@ -1107,42 +1450,53 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                                   <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Role</label>
                                   <select 
                                     value={member.role}
-                                    onChange={(e) => updateManualMember(i, 'role', e.target.value)}
+                                    onChange={(e) => {
+                                      const newRole = e.target.value as FamilyMemberRole;
+                                      const newMembers = [...manualFamilyForm.members];
+                                      newMembers[i] = { 
+                                        ...newMembers[i], 
+                                        role: newRole,
+                                        // Clear restricted fields for children
+                                        ...(newRole === 'Child' ? { email: '', phone: '' } : {})
+                                      };
+                                      setManualFamilyForm(prev => ({ ...prev, members: newMembers }));
+                                    }}
                                     className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm appearance-none"
                                   >
-                                    <option value="Primary Adult">Primary Adult</option>
-                                    <option value="Additional Adult/Parent">Additional Adult/Parent</option>
+                                    <option value="Adult">Adult</option>
                                     <option value="Teen">Teen</option>
                                     <option value="Child">Child</option>
                                   </select>
                                 </div>
+                                {member.role !== 'Child' && (
+                                  <>
+                                    <div className="space-y-1.5 font-sans">
+                                      <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Email (Optional)</label>
+                                      <input 
+                                        type="email" 
+                                        placeholder="email@example.com"
+                                        value={member.email}
+                                        onChange={(e) => updateManualMember(i, 'email', e.target.value)}
+                                        className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm"
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5 font-sans">
+                                      <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Phone (Optional)</label>
+                                      <input 
+                                        type="tel" 
+                                        placeholder="(555) 000-0000"
+                                        value={member.phone}
+                                        onChange={(e) => updateManualMember(i, 'phone', e.target.value)}
+                                        className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm"
+                                      />
+                                    </div>
+                                  </>
+                                )}
                                 <div className="space-y-1.5 font-sans">
-                                  <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Email (Optional)</label>
-                                  <input 
-                                    type="email" 
-                                    placeholder="email@example.com"
-                                    value={member.email}
-                                    onChange={(e) => updateManualMember(i, 'email', e.target.value)}
-                                    className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm"
-                                  />
-                                </div>
-                                <div className="space-y-1.5 font-sans">
-                                  <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Phone (Optional)</label>
-                                  <input 
-                                    type="tel" 
-                                    placeholder="(555) 000-0000"
-                                    value={member.phone}
-                                    onChange={(e) => updateManualMember(i, 'phone', e.target.value)}
-                                    className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm"
-                                  />
-                                </div>
-                                <div className="space-y-1.5 font-sans">
-                                  <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Birthday</label>
-                                  <input 
-                                    type="date" 
+                                  <MonthDayInput 
+                                    label="Birthday"
                                     value={member.birthday}
-                                    onChange={(e) => updateManualMember(i, 'birthday', e.target.value)}
-                                    className="w-full p-3 bg-white border border-stone-border rounded-xl focus:ring-2 focus:ring-sage/20 outline-none text-sm"
+                                    onChange={(val) => updateManualMember(i, 'birthday', val)}
                                   />
                                 </div>
                               </div>
@@ -1202,7 +1556,9 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                             <p className="text-[10px] uppercase tracking-widest font-bold text-stone-light mb-1 text-center md:text-left">Family Unit</p>
                             <p className="font-serif text-xl text-stone text-center md:text-left break-words [overflow-wrap:anywhere]">
                               {family.members?.length === 1 
-                                ? `${family.members[0].name} ${family.familyName}` 
+                                ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                                  ? family.members[0].name 
+                                  : `${family.members[0].name} ${family.familyName}`)
                                 : `The ${family.familyName} Family`}
                             </p>
                           </div>
@@ -1455,6 +1811,147 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                   </div>
                 )}
 
+                {/* Retroactive Optimization Section */}
+                <div className="bg-sage/5 border border-sage/20 rounded-[2.5rem] p-10 space-y-8">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div className="space-y-2">
+                       <div className="flex items-center gap-2">
+                         <div className="p-2 bg-sage/20 text-sage rounded-lg">
+                           <Zap size={20} />
+                         </div>
+                         <h3 className="text-2xl font-serif text-stone">Photo Optimization Tool</h3>
+                       </div>
+                       <p className="text-sm text-stone-light max-w-xl">
+                         Automatically convert all existing family photos to optimized JPEGs (max 1200px) for lightning-fast directory loading.
+                       </p>
+                    </div>
+                    
+                        <div className="flex flex-col sm:flex-row gap-4">
+                           <button 
+                             onClick={runImageOptimization}
+                             disabled={isOptimizing}
+                             className={`
+                               px-8 py-4 rounded-2xl font-bold uppercase tracking-widest text-[10px] shadow-xl transition-all flex items-center gap-3
+                               ${isOptimizing ? 'bg-stone-border text-stone-light' : 'bg-sage text-white hover:scale-105 active:scale-95'}
+                             `}
+                           >
+                             {isOptimizing ? (
+                               <>
+                                 <Loader2 size={16} className="animate-spin" />
+                                 Processing...
+                               </>
+                             ) : (
+                               <>
+                                 <RefreshCcw size={16} />
+                                 Launch Optimization
+                               </>
+                             )}
+                           </button>
+
+                           <button 
+                             onClick={repairAndRefreshPhotos}
+                             className="px-8 py-4 bg-white text-sage border border-sage/20 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:bg-sage/5 transition-all shadow-sm flex items-center gap-2"
+                             title="Fixes broken links and refreshes all download tokens"
+                           >
+                             <Check size={16} />
+                             Repair & Refresh Photos
+                           </button>
+
+                           <button 
+                             onClick={flushImageCaches}
+                             disabled={isFlushing}
+                             className={`
+                               px-8 py-4 rounded-2xl font-bold uppercase tracking-widest text-[10px] shadow-xl transition-all flex items-center gap-3
+                               ${isFlushing ? 'bg-stone-border text-stone-light' : 'bg-terracotta text-white hover:scale-105 active:scale-95'}
+                             `}
+                             title="Forces mobile browsers to fetch new images by appending a timestamp"
+                           >
+                             {isFlushing ? (
+                               <>
+                                 <Loader2 size={16} className="animate-spin" />
+                                 Flushing...
+                               </>
+                             ) : (
+                               <>
+                                 <Zap size={16} />
+                                 Flush Image Caches
+                               </>
+                             )}
+                           </button>
+                        </div>
+                  </div>
+
+                  {(isOptimizing || optimizationLogs.length > 0) && (
+                    <div className="space-y-6 pt-4">
+                      {isOptimizing && (
+                        <div className="flex flex-col gap-4">
+                          <div className="flex justify-between items-end">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-stone-light">
+                              Overall Progress: {optimizationProgress.current} / {optimizationProgress.total}
+                            </span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-sage">
+                              {Math.round((optimizationProgress.current / (optimizationProgress.total || 1)) * 100)}% Complete
+                            </span>
+                          </div>
+                          
+                          <div className="h-3 w-full bg-stone-border rounded-full overflow-hidden">
+                            <motion.div 
+                              className="h-full bg-sage"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(optimizationProgress.current / (optimizationProgress.total || 1)) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-8">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-stone-light">
+                          Succeeded: <span className="text-sage text-sm ml-1">{optimizationProgress.success}</span>
+                        </div>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-stone-light">
+                          Failed: <span className="text-terracotta text-sm ml-1">{optimizationProgress.errors}</span>
+                        </div>
+                      </div>
+
+                      {/* Visible Status Log */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-stone-light opacity-50">Activity Log</label>
+                          {!isOptimizing && (
+                            <button 
+                              onClick={() => setOptimizationLogs([])}
+                              className="text-[10px] font-bold uppercase tracking-widest hover:text-stone transition-colors text-stone-light"
+                            >
+                              Clear Results
+                            </button>
+                          )}
+                        </div>
+                        <div 
+                          id="optimization-log-container"
+                          className="h-64 bg-stone text-sage-light/80 p-6 rounded-3xl font-mono text-[10px] overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-sage/20"
+                        >
+                          {optimizationLogs.map((log, i) => (
+                            <div key={i} className={`flex gap-2 ${log.startsWith('✅') ? 'text-sage' : log.startsWith('❌') ? 'text-terracotta' : ''}`}>
+                              <span className="opacity-30">[{new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}]</span>
+                              <span>{log}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {!isOptimizing && (
+                        <div className="flex items-center gap-3 text-sage bg-sage/5 border border-sage/20 p-6 rounded-3xl">
+                          <Check size={20} />
+                          <div>
+                            <p className="font-bold text-stone">Batch Optimization Finished</p>
+                            <p className="text-sm text-stone-light">Checked {optimizationProgress.total} families. {optimizationProgress.success} were updated.</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pt-8 border-t border-stone-border">
                   <div>
                     <h3 className="text-3xl font-serif text-stone">System Clean-up</h3>
@@ -1499,7 +1996,7 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                               <button 
                                 onClick={() => {
                                   const subject = encodeURIComponent('Join the Redeemer Directory');
-                                  const firstName = member.name.split(' ')[0];
+                                  const firstName = (member.name || '').split(' ')[0];
                                   const body = encodeURIComponent(`Hi ${firstName},\n\nWe noticed you are listed in our family directory but haven't created your login yet. Join us here to update your info and photo:\n\n${magicLink || 'https://directory.redeemeratl.org'}\n\nWelcome to the directory!`);
                                   window.open(`mailto:${member.email}?subject=${subject}&body=${body}`, '_blank');
                                 }}
@@ -1514,6 +2011,74 @@ export default function AdminDashboard({ onClose }: AdminDashboardProps) {
                     </table>
                   </div>
                 )}
+              </motion.div>
+            )}
+            {activeTab === 'settings' && (
+              <motion.div 
+                key="settings"
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                className="max-w-4xl mx-auto space-y-12"
+              >
+                <div className="bg-white p-10 rounded-[2.5rem] shadow-card border border-stone-border">
+                  <div className="flex items-center justify-between mb-8">
+                    <div>
+                      <h3 className="text-2xl font-serif text-stone">Email Templates</h3>
+                      <p className="text-sm text-stone-light">Customize the communication sent to your members.</p>
+                    </div>
+                    <div className="p-3 bg-sage/10 text-sage rounded-2xl">
+                      <Mail size={24} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-8">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Invitation Email Subject</label>
+                        <span className="text-[10px] text-stone-light italic">Available: {"{{names}}"}, {"{{familyName}}"}</span>
+                      </div>
+                      <input 
+                        type="text"
+                        value={settings?.inviteEmailTemplate?.subject || ''}
+                        onChange={(e) => setSettings(prev => prev ? ({
+                          ...prev,
+                          inviteEmailTemplate: { ...prev.inviteEmailTemplate, subject: e.target.value }
+                        }) : null)}
+                        className="w-full p-4 bg-gray-50 border border-stone-border rounded-2xl focus:ring-4 focus:ring-sage/5 outline-none transition-all"
+                        placeholder="e.g. Welcome to the Directory!"
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[10px] uppercase tracking-widest font-bold text-stone-light">Invitation Email Body</label>
+                        <span className="text-[10px] text-stone-light italic">Available: {"{{names}}"}, {"{{familyName}}"}, {"{{link}}"}</span>
+                      </div>
+                      <textarea 
+                        value={settings?.inviteEmailTemplate?.body || ''}
+                        onChange={(e) => setSettings(prev => prev ? ({
+                          ...prev,
+                          inviteEmailTemplate: { ...prev.inviteEmailTemplate, body: e.target.value }
+                        }) : null)}
+                        rows={10}
+                        className="w-full p-6 bg-gray-50 border border-stone-border rounded-3xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-sm font-sans leading-relaxed"
+                        placeholder="Hi {{names}}..."
+                      />
+                      <p className="text-[10px] text-stone-light leading-relaxed">
+                        <strong>Pro-tip:</strong> Use placeholders to make emails unique. For example, the magic link must be included as <strong>{"{{link}}"}</strong> to work correctly.
+                      </p>
+                    </div>
+
+                    <div className="pt-8 border-t border-stone-border flex justify-end">
+                      <button 
+                        onClick={saveSettings}
+                        disabled={isSavingSettings}
+                        className="px-10 py-4 bg-sage text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:brightness-110 shadow-xl shadow-sage/10 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSavingSettings ? "Saving..." : "Save Settings"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

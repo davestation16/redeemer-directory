@@ -18,6 +18,8 @@ export default function Directory() {
   const { profile, isAdmin, user } = useAuth();
   const navigate = useNavigate();
   const [families, setFamilies] = useState<Family[]>([]);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [pendingConflictsCount, setPendingConflictsCount] = useState(0);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'directory' | 'calendar' | 'admin' | 'my-family'>('directory');
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -68,8 +70,34 @@ export default function Directory() {
       setLoading(false);
     });
 
-    return unsubscribe;
-  }, []);
+    // Only fetch pending counts if admin
+    let requestsUnsub = () => {};
+    let conflictsUnsub = () => {};
+
+    if (isAdmin) {
+      requestsUnsub = onSnapshot(query(collection(db, 'requests')), (snapshot) => {
+        const pending = snapshot.docs.filter(d => d.data().status === 'pending');
+        setPendingRequestsCount(pending.length);
+      });
+
+      conflictsUnsub = onSnapshot(query(collection(db, 'system_logs')), (snapshot) => {
+        const unresolved = snapshot.docs.filter(d => d.data().type === 'onboarding_conflict' && !d.data().resolved);
+        setPendingConflictsCount(unresolved.length);
+      });
+    }
+
+    return () => {
+      unsubscribe();
+      requestsUnsub();
+      conflictsUnsub();
+    };
+  }, [isAdmin]);
+
+  const pendingPhotosCount = useMemo(() => {
+    return families.filter(f => f.photoStatus === 'pending').length;
+  }, [families]);
+
+  const totalAdminNotifications = pendingPhotosCount + pendingRequestsCount + pendingConflictsCount;
 
   const filteredFamilies = useMemo(() => {
     return families.filter(f => {
@@ -78,10 +106,10 @@ export default function Directory() {
         return false;
       }
 
-      return f.familyName.toLowerCase().includes(search.toLowerCase()) ||
+      return (f.familyName || '').toLowerCase().includes(search.toLowerCase()) ||
         f.members?.some(m => 
-          m.name.toLowerCase().includes(search.toLowerCase()) ||
-          m.email?.toLowerCase().includes(search.toLowerCase())
+          (m.name || '').toLowerCase().includes(search.toLowerCase()) ||
+          (m.email || '').toLowerCase().includes(search.toLowerCase())
         );
     });
   }, [families, search]);
@@ -187,9 +215,16 @@ export default function Directory() {
               {isAdmin && (
                 <button 
                   onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
-                  className={`flex items-center gap-4 text-xl font-medium w-full text-left transition-all ${activeTab === 'admin' ? 'text-white' : 'text-white/60'}`}
+                  className={`flex items-center justify-between font-medium w-full text-left transition-all ${activeTab === 'admin' ? 'text-white' : 'text-white/60'}`}
                 >
-                  <Edit size={24} /> Admin Panel
+                  <div className="flex items-center gap-4 text-xl">
+                    <Edit size={24} /> Admin Panel
+                  </div>
+                  {totalAdminNotifications > 0 && (
+                    <div className="bg-white text-sage text-[10px] h-6 min-w-[1.5rem] px-1.5 rounded-full flex items-center justify-center font-bold">
+                      {totalAdminNotifications}
+                    </div>
+                  )}
                 </button>
               )}
               <div className="h-px bg-white/10 my-8" />
@@ -257,9 +292,20 @@ export default function Directory() {
             {isAdmin && (
               <button 
                 onClick={() => setActiveTab('admin')}
-                className={`flex items-center gap-3 p-3 rounded-xl w-full text-left transition-colors ${activeTab === 'admin' ? 'bg-white/10' : 'opacity-70 hover:opacity-100'}`}
+                className={`flex items-center justify-between p-3 rounded-xl w-full text-left transition-colors relative ${activeTab === 'admin' ? 'bg-white/10' : 'opacity-70 hover:opacity-100'}`}
               >
-                <Edit size={18} /> Admin Panel
+                <div className="flex items-center gap-3">
+                  <Edit size={18} /> Admin Panel
+                </div>
+                {totalAdminNotifications > 0 && (
+                  <motion.div 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="bg-white text-sage text-[10px] h-5 min-w-[1.25rem] px-1 rounded-full flex items-center justify-center font-bold shadow-lg"
+                  >
+                    {totalAdminNotifications}
+                  </motion.div>
+                )}
               </button>
             )}
             <button 
@@ -377,7 +423,9 @@ export default function Directory() {
                           <div className="px-2">
                             <h3 className="font-serif text-lg text-stone group-hover:text-sage transition-colors leading-tight break-words [overflow-wrap:anywhere]">
                               {family.members?.length === 1 
-                                ? `${family.members[0].name} ${family.familyName}` 
+                                ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                                  ? family.members[0].name 
+                                  : `${family.members[0].name} ${family.familyName}`)
                                 : `The ${family.familyName} Family`}
                             </h3>
                             <p className="text-[10px] uppercase font-bold text-stone-light tracking-widest opacity-60 mt-2">
@@ -406,7 +454,9 @@ export default function Directory() {
                       <div className="space-y-4">
                         <h1 className="text-5xl font-serif text-stone">
                           {family.members?.length === 1 
-                            ? `${family.members[0].name} ${family.familyName}` 
+                            ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                              ? family.members[0].name 
+                              : `${family.members[0].name} ${family.familyName}`)
                             : `The ${family.familyName} Family`}
                         </h1>
                         {family.address && (

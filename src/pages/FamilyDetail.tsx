@@ -49,9 +49,12 @@ export default function FamilyDetail() {
   const formatDisplayDate = (dateStr?: string) => {
     if (!dateStr) return null;
     try {
-      // Handle YYYY-MM-DD
-      const [year, month, day] = dateStr.split('-').map(Number);
-      const date = new Date(year, month - 1, day);
+      const parts = (dateStr || '').split('-').map(Number);
+      const m = parts[parts.length - 2];
+      const d = parts[parts.length - 1];
+      if (isNaN(m) || isNaN(d)) return dateStr;
+      // Use a fixed year for formatting since we only care about month/day
+      const date = new Date(2000, m - 1, d);
       return format(date, 'MMMM do');
     } catch (e) {
       return dateStr;
@@ -132,7 +135,9 @@ export default function FamilyDetail() {
         >
           <h1 className="font-serif text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-stone leading-tight tracking-tight text-center md:text-left break-words [overflow-wrap:anywhere] w-full">
             {family.members?.length === 1 
-              ? `${family.members[0].name} ${family.familyName}` 
+              ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                 ? family.members[0].name 
+                 : `${family.members[0].name} ${family.familyName}`)
               : `The ${family.familyName} Family`}
           </h1>
         </motion.div>

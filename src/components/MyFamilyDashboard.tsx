@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db, storage, auth, handleFirestoreError, OperationType, doc, updateDoc, setDoc, getDocFromServer, collection, query, where, onSnapshot, serverTimestamp, onAuthStateChanged } from '../lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../hooks/useAuth';
 import { Family, FamilyMember } from '../types';
-import { Camera, MapPin, Phone, Mail, Loader2, CheckCircle2, AlertCircle, Users, Plus, X, Link, Copy } from 'lucide-react';
+import { Camera, MapPin, Phone, Mail, Loader2, CheckCircle2, AlertCircle, Users, Plus, X, Link, Copy, Info } from 'lucide-react';
 import { toast } from 'sonner';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import imageCompression from 'browser-image-compression';
 
 export default function MyFamilyDashboard() {
@@ -22,6 +22,8 @@ export default function MyFamilyDashboard() {
   });
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [fetchingCode, setFetchingCode] = useState(false);
+  const [showRoleInfo, setShowRoleInfo] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!family?.id) return;
@@ -58,12 +60,12 @@ export default function MyFamilyDashboard() {
   const handleGenerateInvite = async () => {
     if (!family || !user || !profile) return;
 
-    // Security check: admin or Primary Adult
-    const isPrimaryAdult = family.members.some(m => m.email?.toLowerCase() === user.email?.toLowerCase() && m.role === 'Primary Adult');
+    // Security check: admin or Adult
+    const isAdult = family.members.some(m => m.email?.toLowerCase() === user.email?.toLowerCase() && m.role === 'Adult');
     const isAdmin = profile.role === 'admin';
 
-    if (!isAdmin && !isPrimaryAdult) {
-      toast.error("Only a Primary Adult or Admin can generate a new invite link.");
+    if (!isAdmin && !isAdult) {
+      toast.error("Only an Adult or Admin can generate a new invite link.");
       return;
     }
 
@@ -192,11 +194,12 @@ export default function MyFamilyDashboard() {
       // 2. Client-side compression
       const options = {
         maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
+        maxWidthOrHeight: 1200, // Reduced from 1920 to 1200 for even faster loading
         useWebWorker: true,
+        fileType: 'image/jpeg' // Force conversion to JPEG
       };
 
-      toast.info("Compressing image...");
+      toast.info("Optimizing image...");
       const compressedFile = await imageCompression(file, options);
       console.log("[UPLOAD_COMPRESSION]: Image compressed", { 
         originalSize: file.size, 
@@ -204,7 +207,7 @@ export default function MyFamilyDashboard() {
       });
 
       // 3. Upload to Storage
-      const storagePath = `families/${family.id}/photo`;
+      const storagePath = `families/${family.id}/photo_${Date.now()}`;
       const storageRef = ref(storage, storagePath);
       
       console.log("[UPLOAD_STORAGE_ATTEMPT]: Starting storage upload", { 
@@ -213,7 +216,7 @@ export default function MyFamilyDashboard() {
         authUid: currentUser.uid
       });
       
-      const uploadTask = uploadBytesResumable(storageRef, compressedFile);
+      const uploadTask = uploadBytesResumable(storageRef, compressedFile, { contentType: 'image/jpeg' });
 
       uploadTask.on('state_changed', 
         (snapshot) => {
@@ -317,13 +320,57 @@ export default function MyFamilyDashboard() {
     setFormData(prev => ({ ...prev, members: newMembers }));
   };
 
-  if (loading) {
+  const MonthDayInput = ({ value, onChange, label }: { value?: string, onChange: (val: string) => void, label: string }) => {
+    const [month, day] = (value || '').split('-').slice(-2);
+    
+    const months = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    const handleMonthChange = (newMonth: string) => {
+      const d = day || '01';
+      onChange(`1000-${newMonth.padStart(2, '0')}-${d.padStart(2, '0')}`);
+    };
+
+    const handleDayChange = (newDay: string) => {
+      const m = month || '01';
+      onChange(`1000-${m.padStart(2, '0')}-${newDay.padStart(2, '0')}`);
+    };
+
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="animate-spin text-sage" size={40} />
+      <div className="space-y-1">
+        <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">{label}</label>
+        <div className="grid grid-cols-2 gap-2">
+          <select 
+            value={month || ''} 
+            onChange={(e) => handleMonthChange(e.target.value)}
+            className="w-full px-3 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light appearance-none"
+          >
+            <option value="">Month</option>
+            {months.map((m, i) => (
+              <option key={m} value={(i + 1).toString().padStart(2, '0')}>{m}</option>
+            ))}
+          </select>
+          <select 
+            value={day || ''} 
+            onChange={(e) => handleDayChange(e.target.value)}
+            className="w-full px-3 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light appearance-none"
+          >
+            <option value="">Day</option>
+            {Array.from({ length: 31 }, (_, i) => (
+              <option key={i + 1} value={(i + 1).toString().padStart(2, '0')}>{i + 1}</option>
+            ))}
+          </select>
+        </div>
       </div>
     );
-  }
+  };
+
+  const currentUserMember = family?.members.find(m => m.email?.toLowerCase() === user?.email?.toLowerCase());
+  const isAdult = currentUserMember?.role === 'Adult' || profile?.role === 'admin';
+  const isTeen = currentUserMember?.role === 'Teen';
+  const canEditFamilyDetails = isAdult;
 
   if (!family) {
     return (
@@ -369,9 +416,13 @@ export default function MyFamilyDashboard() {
               className={`w-full h-full object-cover ${family.photoStatus === 'approved' ? '' : 'grayscale brightness-75'}`} 
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-[10rem] font-serif text-sage/10">
-              <Users size={120} className="mb-4 opacity-20" />
-              <span>{family.familyName[0]}</span>
+            <div 
+              className="w-full h-full flex flex-col items-center justify-center text-center p-6 cursor-pointer group/placeholder"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Users size={80} className="mb-4 text-sage/20 group-hover/placeholder:scale-110 transition-transform" />
+              <p className="text-sage font-serif text-2xl">The {family.familyName} Family</p>
+              <p className="text-sage/60 text-xs uppercase tracking-widest font-bold mt-2">Click here to add your photo</p>
             </div>
           )}
           
@@ -379,7 +430,9 @@ export default function MyFamilyDashboard() {
             <div className="text-white text-center md:text-left w-full">
               <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-serif mb-3 break-words [overflow-wrap:anywhere]">
                 {family.members?.length === 1 
-                  ? `${family.members[0].name} ${family.familyName}` 
+                  ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                    ? family.members[0].name 
+                    : `${family.members[0].name} ${family.familyName}`)
                   : `The ${family.familyName} Family`}
               </h1>
               <div className="flex items-center justify-center md:justify-start gap-2 text-xs uppercase tracking-widest font-bold opacity-80">
@@ -398,7 +451,14 @@ export default function MyFamilyDashboard() {
               </div>
               
               <label className="cursor-pointer bg-white/20 backdrop-blur-md hover:bg-white/30 text-white p-4 rounded-full transition-all relative group/btn shrink-0">
-                <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} disabled={uploading} />
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  className="hidden" 
+                  accept="image/*" 
+                  onChange={handlePhotoUpload} 
+                  disabled={uploading} 
+                />
                 {uploading ? (
                   <div className="relative flex items-center justify-center">
                     <Loader2 className="animate-spin" size={24} />
@@ -468,17 +528,16 @@ export default function MyFamilyDashboard() {
                   placeholder="e.g. The Miller Family"
                   value={formData.familyName}
                   onChange={(e) => setFormData({ ...formData, familyName: e.target.value })}
-                  className="w-full p-4 bg-white border border-stone-border rounded-xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-2xl font-serif text-stone"
+                  disabled={!canEditFamilyDetails}
+                  className="w-full p-4 bg-white border border-stone-border rounded-xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-2xl font-serif text-stone disabled:opacity-50"
                   required
                 />
               </div>
               <div>
-                <label className="block text-[10px] uppercase font-bold text-stone-light mb-2 tracking-[0.2em]">Wedding Anniversary (Optional)</label>
-                <input 
-                  type="date" 
+                <MonthDayInput 
+                  label="Wedding Anniversary (Optional)"
                   value={formData.weddingAnniversary}
-                  onChange={(e) => setFormData({ ...formData, weddingAnniversary: e.target.value })}
-                  className="w-full p-4 bg-white border border-stone-border rounded-xl focus:ring-4 focus:ring-sage/5 outline-none transition-all text-stone font-medium"
+                  onChange={(val) => canEditFamilyDetails && setFormData({ ...formData, weddingAnniversary: val })}
                 />
               </div>
             </section>
@@ -490,6 +549,7 @@ export default function MyFamilyDashboard() {
                     <h3 className="text-xs uppercase tracking-[0.2em] font-bold text-stone-light">Household Members</h3>
                     <p className="text-[10px] text-stone-light mt-1 uppercase tracking-wider opacity-60">Add everyone living at this address.</p>
                   </div>
+                {isAdult && (
                   <button 
                     type="button" 
                     onClick={addMember}
@@ -497,18 +557,24 @@ export default function MyFamilyDashboard() {
                   >
                     <Plus size={14} /> Add Member
                   </button>
+                )}
                 </div>
                 
                 <div className="space-y-6">
-                  {formData.members.map((member, i) => (
+                  {formData.members.map((member, i) => {
+                    const isOwnProfile = member.email?.toLowerCase() === user?.email?.toLowerCase();
+                    const canEditMember = isAdult || isOwnProfile;
+                    
+                    return (
                     <div key={i} className="p-6 bg-gray-50/50 border border-stone-border rounded-2xl space-y-4 relative group hover:border-sage/30 transition-all">
-                      {formData.members.length > 1 && (
+                      {(formData.members.length > 1 && isAdult) && (
                         <button 
                           type="button" 
                           onClick={() => removeMember(i)}
-                          className="absolute right-4 top-4 p-2 text-stone-light hover:text-red-500 hover:bg-red-50 transition-all rounded-full"
+                          className="absolute right-4 top-4 w-9 h-9 flex items-center justify-center text-stone-light hover:text-red-500 hover:bg-red-50 transition-all rounded-full p-0"
+                          title="Remove member"
                         >
-                          <X size={16} />
+                          <X size={18} />
                         </button>
                       )}
                       
@@ -521,19 +587,80 @@ export default function MyFamilyDashboard() {
                               placeholder="Name" 
                               value={member.name}
                               onChange={(e) => updateMember(i, 'name', e.target.value)}
-                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-stone font-medium text-sm"
+                              disabled={!isAdult}
+                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-stone font-medium text-sm disabled:opacity-50"
                               required
                             />
                           </div>
-                          <div className="md:col-span-3 space-y-1">
-                            <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Role</label>
+                          <div className="md:col-span-3 space-y-1 relative">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Role</label>
+                              <button 
+                                type="button"
+                                onClick={() => setShowRoleInfo(showRoleInfo === i ? null : i)}
+                                className="text-stone-light hover:text-sage transition-colors"
+                              >
+                                <Info size={12} />
+                              </button>
+                            </div>
+
+                            <AnimatePresence>
+                              {showRoleInfo === i && (
+                                <>
+                                  <div 
+                                    className="fixed inset-0 z-40" 
+                                    onClick={() => setShowRoleInfo(null)}
+                                  />
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                                    className="absolute bottom-full left-0 mb-3 z-50 p-5 w-72 bg-white rounded-2xl shadow-xl border border-stone-border"
+                                  >
+                                    <div className="space-y-4">
+                                      <div className="space-y-1">
+                                        <p className="text-[10px] font-bold uppercase text-sage tracking-wider">Adult</p>
+                                        <p className="text-xs text-stone-light leading-relaxed">
+                                          Adults manage the household! You can update the main family details and add or remove members from your family.
+                                        </p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="text-[10px] font-bold uppercase text-sage tracking-wider">Teen</p>
+                                        <p className="text-xs text-stone-light leading-relaxed">
+                                          Teens can add their own phone number or email to stay connected, but they can't change the main family details.
+                                        </p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="text-[10px] font-bold uppercase text-sage tracking-wider">Child</p>
+                                        <p className="text-xs text-stone-light leading-relaxed">
+                                          Children keep it simple. We only ask for their birthday for church celebrations—no private contact info is ever collected!
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {/* Triangle pointer */}
+                                    <div className="absolute -bottom-2 left-4 w-4 h-4 bg-white border-b border-r border-stone-border rotate-45" />
+                                  </motion.div>
+                                </>
+                              )}
+                            </AnimatePresence>
+
                             <select
                               value={member.role}
-                              onChange={(e) => updateMember(i, 'role', e.target.value)}
-                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-stone font-medium text-sm appearance-none"
+                              onChange={(e) => {
+                                const newRole = e.target.value as any;
+                                const newMembers = [...formData.members];
+                                newMembers[i] = { 
+                                  ...newMembers[i], 
+                                  role: newRole,
+                                  // Clear restricted fields for children
+                                  ...(newRole === 'Child' ? { email: '', phone: '' } : {})
+                                };
+                                setFormData(prev => ({ ...prev, members: newMembers }));
+                              }}
+                              disabled={!isAdult}
+                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-stone font-medium text-sm appearance-none disabled:opacity-50"
                             >
-                              <option value="Primary Adult">Primary Adult</option>
-                              <option value="Additional Adult/Parent">Additional Adult</option>
+                              <option value="Adult">Adult</option>
                               <option value="Teen">Teen</option>
                               <option value="Child">Child</option>
                             </select>
@@ -541,39 +668,41 @@ export default function MyFamilyDashboard() {
                         </div>
 
                         <div className="lg:col-span-12 grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-stone-border/30">
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Birthday (Optional)</label>
-                            <input 
-                              type="date" 
-                              value={member.birthday || ''}
-                              onChange={(e) => updateMember(i, 'birthday', e.target.value)}
-                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Email (Optional)</label>
-                            <input 
-                              type="email" 
-                              placeholder="Email" 
-                              value={member.email || ''}
-                              onChange={(e) => updateMember(i, 'email', e.target.value)}
-                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Phone (Optional)</label>
-                            <input 
-                              type="tel" 
-                              placeholder="Phone" 
-                              value={member.phone || ''}
-                              onChange={(e) => updateMember(i, 'phone', e.target.value)}
-                              className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light"
-                            />
-                          </div>
+                          <MonthDayInput 
+                            label="Birthday (Optional)"
+                            value={member.birthday || ''}
+                            onChange={(val) => canEditMember && updateMember(i, 'birthday', val)}
+                          />
+                          {member.role !== 'Child' && (
+                            <>
+                              <div className="space-y-1">
+                                <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Email (Optional)</label>
+                                <input 
+                                  type="email" 
+                                  placeholder="Email" 
+                                  value={member.email || ''}
+                                  onChange={(e) => updateMember(i, 'email', e.target.value)}
+                                  disabled={!canEditMember}
+                                  className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light disabled:opacity-50"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] uppercase font-bold text-stone-light tracking-widest">Phone (Optional)</label>
+                                <input 
+                                  type="tel" 
+                                  placeholder="Phone" 
+                                  value={member.phone || ''}
+                                  onChange={(e) => updateMember(i, 'phone', e.target.value)}
+                                  disabled={!canEditMember}
+                                  className="w-full px-4 py-3 bg-white border border-stone-border rounded-xl outline-none focus:ring-4 focus:ring-sage/5 transition-all text-xs text-stone-light disabled:opacity-50"
+                                />
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               </section>
 
@@ -588,7 +717,8 @@ export default function MyFamilyDashboard() {
                     placeholder="Your address..." 
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    className="w-full pl-14 pr-6 py-6 bg-gray-50/50 border border-stone-border rounded-[2.5rem] outline-none focus:ring-4 focus:ring-sage/5 transition-all h-40 resize-none font-medium text-stone"
+                    disabled={!canEditFamilyDetails}
+                    className="w-full pl-14 pr-6 py-6 bg-gray-50/50 border border-stone-border rounded-[2.5rem] outline-none focus:ring-4 focus:ring-sage/5 transition-all h-40 resize-none font-medium text-stone disabled:opacity-50"
                   />
                 </div>
               </section>

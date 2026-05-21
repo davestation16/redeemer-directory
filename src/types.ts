@@ -10,7 +10,7 @@ export interface UserProfile {
   updatedAt: any;
 }
 
-export type FamilyMemberRole = 'Primary Adult' | 'Additional Adult/Parent' | 'Teen' | 'Child';
+export type FamilyMemberRole = 'Adult' | 'Teen' | 'Child';
 
 export interface FamilyMember {
   name: string;
@@ -64,4 +64,13 @@ export interface InviteCode {
   invitedEmails: string[];
   status: 'active' | 'revoked';
   createdAt: any;
+}
+
+export interface SystemSettings {
+  id: string;
+  inviteEmailTemplate: {
+    subject: string;
+    body: string;
+  };
+  updatedAt: any;
 }

@@ -3,6 +3,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 export { onAuthStateChanged };
 import { getFirestore, doc, getDocFromServer, updateDoc, setDoc, collection, addDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { toast } from 'sonner';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase with the explicit config from the JSON file
@@ -62,9 +63,10 @@ export enum OperationType {
  * Standardized error handler for better debugging of rules and permissions
  */
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const message = error instanceof Error ? error.message : String(error);
   const errInfo = {
     error: error instanceof Error ? error.name : 'UnknownError',
-    message: error instanceof Error ? error.message : String(error),
+    message,
     operationType,
     path,
     authInfo: {
@@ -77,5 +79,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   
   console.error('[FIREBASE_DEBUG_REPORT]:', JSON.stringify(errInfo, null, 2));
-  return errInfo;
+  
+  // Provide user feedback
+  if (message.includes('permission-denied') || message.includes('insufficient permissions')) {
+    toast.error("You don't have permission to perform this action. If you're an admin, please verify your status.");
+  } else if (message.includes('quota-exceeded')) {
+    toast.error("Firebase quota exceeded. Please try again later.");
+  } else {
+    toast.error(`Operation failed: ${message}`);
+  }
+
+  throw new Error(JSON.stringify(errInfo));
 }

@@ -63,9 +63,9 @@ export default function Calendar() {
           // Process birthdays
           family.members?.forEach(member => {
             if (member.birthday) {
-              const parts = member.birthday.split('-');
-              const m = parseInt(parts[1]);
-              const d = parseInt(parts[2]);
+              const parts = (member.birthday || '').split('-');
+              const m = parseInt(parts[parts.length - 2]);
+              const d = parseInt(parts[parts.length - 1]);
               
               if (!isNaN(m) && !isNaN(d)) {
                 allEvents.push({
@@ -99,15 +99,19 @@ export default function Calendar() {
 
           // Process anniversaries
           if (family.weddingAnniversary) {
-            const parts = family.weddingAnniversary.split('-');
-            const m = parseInt(parts[1]);
-            const d = parseInt(parts[2]);
+            const parts = (family.weddingAnniversary || '').split('-');
+            const m = parseInt(parts[parts.length - 2]);
+            const d = parseInt(parts[parts.length - 1]);
             if (!isNaN(m) && !isNaN(d)) {
                 const displayLabel = family.members?.length === 1 
-                  ? `${family.members[0].name} ${family.familyName}'s Anniversary`
+                  ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase()) 
+                    ? `${family.members[0].name}'s Anniversary`
+                    : `${family.members[0].name} ${family.familyName}'s Anniversary`)
                   : `The ${family.familyName} Family Anniversary`;
                 const entityName = family.members?.length === 1
-                  ? `${family.members[0].name} ${family.familyName}`
+                  ? (family.members[0].name.toLowerCase().includes(family.familyName.toLowerCase())
+                    ? family.members[0].name
+                    : `${family.members[0].name} ${family.familyName}`)
                   : `The ${family.familyName} Family`;
                 
                 allEvents.push({

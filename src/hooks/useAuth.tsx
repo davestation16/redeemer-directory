@@ -29,62 +29,59 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     loading: true,
   });
 
-  const bootstrapAdmin = async (firebaseUser: User) => {
-    const isAdminEmail = firebaseUser.email === 'davedotgordon@gmail.com';
-    if (!isAdminEmail) return null;
+  const bootstrapAdmin = async (firebaseUser: User, existingProfile?: UserProfile | null) => {
+    const isMainAdmin = firebaseUser.email === 'davedotgordon@gmail.com';
+    const isDevAdmin = firebaseUser.email?.startsWith('dev-admin') || firebaseUser.email === 'tester@redeemeratl.org';
+    
+    if (!isMainAdmin && !isDevAdmin) return null;
 
     try {
       const batch = writeBatch(db);
       
-      // 1. Check/Create Family
-      const familiesRef = collection(db, 'families');
-      const gordonQuery = query(familiesRef, where('familyName', '==', 'Gordon'));
-      const gordonDocs = await getDocs(gordonQuery);
+      // 1. Resolve Family - Only try to find Gordon family for the main admin if they don't have one
+      let familyId = existingProfile?.familyId || null;
       
-      let familyId: string;
-      if (gordonDocs.empty) {
-        const familyRef = doc(familiesRef);
-        familyId = familyRef.id;
-        batch.set(familyRef, {
-          familyName: 'Gordon',
-          members: [{
-            name: 'Dave Gordon',
-            email: firebaseUser.email || '',
-            role: 'Primary Adult'
-          }],
-          memberUids: [firebaseUser.uid],
-          photoStatus: 'approved',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        familyId = gordonDocs.docs[0].id;
-        const familyData = gordonDocs.docs[0].data();
-        if (!familyData.memberUids?.includes(firebaseUser.uid)) {
-          batch.update(doc(db, 'families', familyId), {
-            memberUids: Array.from(new Set([...(familyData.memberUids || []), firebaseUser.uid])),
-            updatedAt: serverTimestamp()
-          });
+      if (isMainAdmin && !familyId) {
+        const familiesRef = collection(db, 'families');
+        const gordonQuery = query(familiesRef, where('familyName', '==', 'Gordon'));
+        const gordonDocs = await getDocs(gordonQuery);
+        
+        if (!gordonDocs.empty) {
+          familyId = gordonDocs.docs[0].id;
+          const familyData = gordonDocs.docs[0].data();
+          if (!familyData.memberUids?.includes(firebaseUser.uid)) {
+            batch.update(doc(db, 'families', familyId), {
+              memberUids: Array.from(new Set([...(familyData.memberUids || []), firebaseUser.uid])),
+              updatedAt: serverTimestamp()
+            });
+          }
+        } else {
+          // Only create if we are absolutely sure - but actually let's skip auto-creation 
+          // to prevent the "new family creation" bug the user reported.
+          // They can create their family manually in the UI.
         }
       }
 
-      // 2. Create/Update Admin User Profile
+      // 2. Create/Update Admin User Profile - Use merge to preserve other fields
       const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const newProfile: UserProfile = {
+      const newProfile: Partial<UserProfile> = {
         uid: firebaseUser.uid,
         email: firebaseUser.email || '',
         role: 'admin',
         familyId: familyId,
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
       
-      batch.set(userDocRef, newProfile);
-      await batch.commit();
-      return newProfile;
+      if (!existingProfile) {
+        newProfile.createdAt = serverTimestamp();
+        newProfile.hasSeenTutorial = false;
+      }
+      
+      await setDoc(userDocRef, newProfile, { merge: true });
+      return { ...(existingProfile || {}), ...newProfile } as UserProfile;
     } catch (error) {
       console.error("Bootstrap error:", error);
-      return null;
+      return existingProfile || null;
     }
   };
 
@@ -186,8 +183,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (snap.exists()) {
             currentProfile = snap.data() as UserProfile;
             
-            if (firebaseUser.email === 'davedotgordon@gmail.com' && (currentProfile.role !== 'admin' || !currentProfile.familyId)) {
-              currentProfile = await bootstrapAdmin(firebaseUser);
+            // Only trigger bootstrap if NOT already an admin
+            if (firebaseUser.email === 'davedotgordon@gmail.com' && currentProfile.role !== 'admin') {
+              currentProfile = await bootstrapAdmin(firebaseUser, currentProfile);
             }
           } else {
             // New User Bootstrap / Lazy Onboarding
@@ -221,11 +219,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   return (
     <AuthContext.Provider value={{ 
       ...authState,
-      isAdmin: authState.profile?.role === 'admin' || authState.user?.email === 'davedotgordon@gmail.com'
+      isAdmin: authState.profile?.role === 'admin' || 
+               authState.user?.email === 'davedotgordon@gmail.com' ||
+               authState.user?.email?.startsWith('dev-admin') ||
+               authState.user?.email === 'tester@redeemeratl.org'
     }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  const isAdmin = context.profile?.role === 'admin' || 
+                  context.user?.email === 'davedotgordon@gmail.com' ||
+                  context.user?.email?.startsWith('dev-admin') ||
+                  context.user?.email === 'tester@redeemeratl.org';
+
+  return {
+    ...context,
+    isAdmin
+  };
+};

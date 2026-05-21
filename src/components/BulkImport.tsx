@@ -161,14 +161,14 @@ export default function BulkImport() {
               name: getVal('adult1Name'),
               phone: getVal('adult1Phone'),
               email: primaryAdultEmail,
-              role: 'Primary Adult'
+              role: 'Adult'
             });
           }
           
           if (getVal('adult2Name')) {
             members.push({
               name: getVal('adult2Name'),
-              role: 'Additional Adult/Parent'
+              role: 'Adult'
             });
           }
 
